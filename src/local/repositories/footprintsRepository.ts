@@ -79,13 +79,6 @@ export async function deleteFootprintCached(id: string) {
   )));
 }
 
-export async function markFootprintFailed(id: string) {
-  const items = await listFootprintsForSync();
-  await persistFootprints(items.map((item) => (
-    item.id === id ? { ...item, sync_status: 'failed' as const } : item
-  )));
-}
-
 export async function replaceFootprintsFromSync(items: FootprintItem[]) {
   return persistFootprints(items.map((item) => normalizeFootprint(item, 'synced')));
 }

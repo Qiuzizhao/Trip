@@ -14,6 +14,21 @@ export function footprintDisplayImageUri(uri: string) {
   return buildAssetUrl(uri) || uri;
 }
 
+// 列表/相册用服务端缩略图（imgproxy 已开启），本地文件保持原样。
+// object/public/... -> render/image/public/...?width=&quality=
+export function thumbnailUrlFor(uri: string, width = 400, quality = 70) {
+  const marker = '/storage/v1/object/public/';
+  const markerIndex = uri.indexOf(marker);
+  if (markerIndex < 0) return uri;
+
+  const base = uri.slice(0, markerIndex);
+  const rest = uri.slice(markerIndex + marker.length);
+  const [key, query] = rest.split('?');
+  const params = [`width=${width}`, `quality=${quality}`];
+  if (query) params.push(query);
+  return `${base}/storage/v1/render/image/public/${key}?${params.join('&')}`;
+}
+
 export function imageSourceFor(uri: string) {
   const cached = footprintImageSourceCache.get(uri);
   if (cached) return cached;

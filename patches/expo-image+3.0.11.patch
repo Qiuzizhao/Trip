@@ -1,0 +1,51 @@
+diff --git a/node_modules/expo-image/ios/ImageUtils.swift b/node_modules/expo-image/ios/ImageUtils.swift
+index be40a77..08afc89 100644
+--- a/node_modules/expo-image/ios/ImageUtils.swift
++++ b/node_modules/expo-image/ios/ImageUtils.swift
+@@ -108,6 +108,11 @@ func shouldDownscale(image: UIImage, toSize size: CGSize, scale: Double) -> Bool
+ func resize(image: UIImage, toSize size: CGSize, scale: Double) -> UIImage {
+   let format = UIGraphicsImageRendererFormat()
+   format.scale = scale
++  // Trip HDR patch: 重绘必须显式要扩展色域，否则 HDR 位图会被压回 SDR（高光塌成一片白）。
++  // 预览大图已改用 enforceEarlyResizing + ImageIO 解码，这里是给其它仍会降采样的路径兜底。
++  if #available(iOS 17.0, *) {
++    format.preferredRange = .extended
++  }
+ 
+   return UIGraphicsImageRenderer(size: size, format: format).image { _ in
+     image.draw(in: CGRect(origin: .zero, size: size))
+@@ -178,6 +183,13 @@ func createSDWebImageContext(forSource source: ImageSource, cachePolicy: ImageCa
+     imageCoderOptionUseAppleWebpCodec: useAppleWebpCodec
+   ]
+ 
++  // Trip HDR patch: 这里才是渲染链路（ImageView）与 ImageLoader 共用的 context 构造点。
++  // 开了它 SDWebImage 才会用 kCGImageSourceDecodeToHDR 解码（否则显式解码成 SDR），
++  // 配合 ImageView 里的 preferredImageDynamicRange = .high 才能在 XDR 屏上呈现 HDR。
++  if #available(iOS 17.0, *) {
++    context[.imageDecodeToHDR] = true
++  }
++
+   // Assets from the bundler have `scale` prop which needs to be passed to the context,
+   // otherwise they would be saved in cache with scale = 1.0 which may result in
+   // incorrectly rendered images for resize modes that don't scale (`center` and `repeat`).
+diff --git a/node_modules/expo-image/ios/ImageView.swift b/node_modules/expo-image/ios/ImageView.swift
+index c33ec33..e91ff9d 100644
+--- a/node_modules/expo-image/ios/ImageView.swift
++++ b/node_modules/expo-image/ios/ImageView.swift
+@@ -15,7 +15,15 @@ public final class ImageView: ExpoView {
+   static let contentFitKey = SDWebImageContextOption(rawValue: "contentFit")
+   static let frameSizeKey = SDWebImageContextOption(rawValue: "frameSize")
+ 
+-  let sdImageView = SDAnimatedImageView(frame: .zero)
++  // Trip HDR patch: 让支持 HDR（HEIC gain map / Dolby Vision 静态图）的照片以扩展动态范围渲染。
++  // iOS 17+ 才有 preferredImageDynamicRange；低版本自动保持原行为（SDR）。
++  let sdImageView: SDAnimatedImageView = {
++    let view = SDAnimatedImageView(frame: .zero)
++    if #available(iOS 17.0, *) {
++      view.preferredImageDynamicRange = .high
++    }
++    return view
++  }()
+ 
+   // Custom image manager doesn't use shared loaders managers by default,
+   // so make sure it is provided here.

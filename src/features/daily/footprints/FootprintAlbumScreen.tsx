@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Image as ExpoImage, type ImageSource, type ImageStyle } from 'expo-image';
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Alert, FlatList, Pressable, StyleSheet, Text, View, type StyleProp } from 'react-native';
 
 import { ScreenShell, Item } from '../_shared/ReplicatedScreens';
@@ -10,6 +10,7 @@ import { listFootprintsLocal } from '@/src/local/repositories/footprintsReposito
 import { StateView } from '@/src/shared/components';
 import { shareFootprintImage } from './download';
 import { FootprintImagePreviewModal } from './FootprintImagePreviewModal';
+import { resolveFootprintImages, type PreviewImage } from './assetResolver';
 
 const footprintAlbumImageSourceCache = new Map<string, ImageSource>();
 
@@ -61,8 +62,9 @@ export function FootprintAlbumScreen({
   const [item, setItem] = useState<Item | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [fullImage, setFullImage] = useState<string | null>(null);
+  const [fullIndex, setFullIndex] = useState<number | null>(null);
   const [downloadingFullImage, setDownloadingFullImage] = useState(false);
+  const [resolvedImages, setResolvedImages] = useState<PreviewImage[] | null>(null);
 
   const loadItem = async () => {
     try {
@@ -72,6 +74,7 @@ export function FootprintAlbumScreen({
       const found = footprints.find((f) => f.id === footprintId);
       if (found) {
         setItem(found);
+        setResolvedImages(await resolveFootprintImages(String(found.id), footprintImageUris(found)));
       } else {
         setError('未找到该足迹记录');
       }
@@ -86,19 +89,25 @@ export function FootprintAlbumScreen({
     void loadItem();
   }, [footprintId]);
 
-  const images = item ? footprintImageUris(item) : [];
+  // 展示用 URI 列表（网格、下载按钮）+ 预览用条目（带拍摄时间）
+  const imageItems = useMemo(
+    () => resolvedImages ?? (item ? footprintImageUris(item).map((uri) => ({ uri })) : []),
+    [item, resolvedImages],
+  );
+  const images = useMemo(() => imageItems.map((entry) => entry.uri), [imageItems]);
 
   const handleDownloadFullImage = useCallback(async () => {
-    if (!fullImage) return;
+    const currentUri = fullIndex === null ? null : images[fullIndex];
+    if (!currentUri) return;
     try {
       setDownloadingFullImage(true);
-      await shareFootprintImage(fullImage);
+      await shareFootprintImage(currentUri);
     } catch (err) {
       Alert.alert('下载失败', err instanceof Error ? err.message : '请稍后重试');
     } finally {
       setDownloadingFullImage(false);
     }
-  }, [fullImage]);
+  }, [fullIndex, images]);
 
   return (
     <ScreenShell title="足迹相册" onBack={onBack}>
@@ -140,12 +149,12 @@ export function FootprintAlbumScreen({
               numColumns={3}
               contentContainerStyle={albumStyles.grid}
               showsVerticalScrollIndicator={false}
-              renderItem={({ item: uri }) => {
+              renderItem={({ item: uri, index }) => {
                 const displayUri = buildAssetUrl(uri) || uri;
                 return (
                   <Pressable
                     style={albumStyles.photoTile}
-                    onPress={() => setFullImage(displayUri)}
+                    onPress={() => setFullIndex(index)}
                   >
                     <CachedFootprintImage uri={displayUri} style={albumStyles.photoImage} />
                   </Pressable>
@@ -164,8 +173,10 @@ export function FootprintAlbumScreen({
       )}
 
       <FootprintImagePreviewModal
-        uri={fullImage}
-        onClose={() => setFullImage(null)}
+        initialIndex={fullIndex ?? 0}
+        items={fullIndex === null ? [] : imageItems}
+        onClose={() => setFullIndex(null)}
+        onIndexChange={setFullIndex}
         action={(
           <Pressable
             accessibilityRole="button"

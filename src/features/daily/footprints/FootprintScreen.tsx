@@ -9,11 +9,13 @@ import { FlatList, InteractionManager, Pressable, Text, View, TextInput, StyleSh
 import { StateView } from '@/src/shared/components';
 import { colors, spacing } from '@/src/shared/theme';
 import { getPreloadedData, homePreloadKeys, setPreloadedData } from '@/src/local/homePreload';
+import { listFootprintIdsWithPendingAssets, subscribeAssetsLocal } from '@/src/local/repositories/assetRepository';
 import { listFootprintsLocal, subscribeFootprintsLocal } from '@/src/local/repositories/footprintsRepository';
 import { styles } from '../_shared/styles';
 import { Item, ScreenShell, SectionCard } from '../_shared/ReplicatedScreens';
 import { FootprintImagePreviewModal } from './FootprintImagePreviewModal';
-import { footprintDisplayImageUri, footprintImageUris, imageSourceFor, prefetchFootprintImages } from './imageCache';
+import { resolveFootprintImageUris, type PreviewImage } from './assetResolver';
+import { footprintDisplayImageUri, footprintImageUris, imageSourceFor, prefetchFootprintImages, thumbnailUrlFor } from './imageCache';
 
 function CachedFootprintImage({
   uri,
@@ -54,7 +56,9 @@ export function FootprintScreen({
   const [items, setItems] = useState<Item[]>(() => getPreloadedData<Item[]>(homePreloadKeys.footprints) ?? []);
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
-  const [previewImage, setPreviewImage] = useState<string | null>(null);
+  const [preview, setPreview] = useState<{ items: PreviewImage[]; index: number } | null>(null);
+  const [pendingAssetIds, setPendingAssetIds] = useState<Set<string>>(() => new Set());
+  const [resolvedAssetUris, setResolvedAssetUris] = useState<Record<string, string[]>>({});
 
   const stats = useMemo(() => {
     return {
@@ -73,6 +77,15 @@ export function FootprintScreen({
     });
   }, [items, searchQuery]);
 
+  // 解析每条记录的展示用图片 URI（asset 优先：本地文件在就用本地，否则用远端对象）。
+  // 记录或资产变化时都要刷新，否则同步后新加的记录不会显示图片。
+  const refreshResolvedAssetUris = useCallback(async (nextItems: Item[]) => {
+    const entries = await Promise.all(nextItems.map(async (item) => (
+      [String(item.id), await resolveFootprintImageUris(String(item.id), footprintImageUris(item))] as const
+    )));
+    setResolvedAssetUris(Object.fromEntries(entries));
+  }, []);
+
   const load = useCallback(async () => {
     setError(null);
     try {
@@ -80,10 +93,12 @@ export function FootprintScreen({
       setPreloadedData(homePreloadKeys.footprints, localItems);
       prefetchFootprintImages(localItems);
       setItems(localItems);
+      setPendingAssetIds(await listFootprintIdsWithPendingAssets());
+      await refreshResolvedAssetUris(localItems);
     } catch (err) {
       setError(err instanceof Error ? err.message : '加载足迹失败');
     }
-  }, []);
+  }, [refreshResolvedAssetUris]);
 
   useFocusEffect(
     useCallback(() => {
@@ -98,7 +113,17 @@ export function FootprintScreen({
     setPreloadedData(homePreloadKeys.footprints, nextItems);
     prefetchFootprintImages(nextItems);
     setItems(nextItems);
-  }), []);
+    void refreshResolvedAssetUris(nextItems);
+    void listFootprintIdsWithPendingAssets().then(setPendingAssetIds).catch(() => undefined);
+  }), [refreshResolvedAssetUris]);
+
+  // 资产变化（上传成功/下载完成/失败标记）也要刷新，否则新增记录在 asset 建立前就被解析成空
+  useEffect(() => subscribeAssetsLocal(() => {
+    void listFootprintsLocal()
+      .then((nextItems) => refreshResolvedAssetUris(nextItems))
+      .catch(() => undefined);
+    void listFootprintIdsWithPendingAssets().then(setPendingAssetIds).catch(() => undefined);
+  }), [refreshResolvedAssetUris]);
 
   return (
     <ScreenShell title="足迹" onBack={onBack} onSettings={onSettings} rightAction={rightAction}>
@@ -155,7 +180,8 @@ export function FootprintScreen({
         )}
         maxToRenderPerBatch={6}
         renderItem={({ item }) => {
-          const images = footprintImageUris(item);
+          const images = resolvedAssetUris[String(item.id)] ?? footprintImageUris(item);
+          const hasPendingAssets = pendingAssetIds.has(String(item.id));
           return (
             <Pressable
               onPress={() => onPressCard(item)}
@@ -179,7 +205,15 @@ export function FootprintScreen({
                         </View>
                       ) : null}
                     </View>
-                    <Text style={[styles.metaText, { marginTop: 4, marginBottom: spacing.xs }]}>{item.visit_date}</Text>
+                    <View style={{ alignItems: 'center', flexDirection: 'row', gap: spacing.sm, marginBottom: spacing.xs, marginTop: 4 }}>
+                      <Text style={styles.metaText}>{item.visit_date}</Text>
+                      {hasPendingAssets ? (
+                        <View style={styles.pendingBadge}>
+                          <Ionicons name="cloud-upload-outline" size={11} color={colors.warning} />
+                          <Text style={styles.pendingBadgeText}>图片待同步</Text>
+                        </View>
+                      ) : null}
+                    </View>
                     {images.length > 0 ? (
                       <View style={styles.footprintImageGrid}>
                         {images.slice(0, 3).map((uri, idx) => {
@@ -201,11 +235,11 @@ export function FootprintScreen({
                                 accessibilityRole="imagebutton"
                                 onPress={(event) => {
                                   event.stopPropagation();
-                                  setPreviewImage(displayUri);
+                                  setPreview({ items: images.map((uri) => ({ uri })), index: idx });
                                 }}
                                 style={{ flex: 1 }}
                               >
-                                <CachedFootprintImage uri={displayUri} style={{ height: '100%', width: '100%' }} />
+                                <CachedFootprintImage uri={thumbnailUrlFor(displayUri)} style={{ height: '100%', width: '100%' }} />
                               </Pressable>
                               {isLastVisible && hasMore ? (
                                 <View
@@ -242,7 +276,11 @@ export function FootprintScreen({
           <Ionicons name="add" size={32} color="#fff" />
         </LinearGradient>
       </Pressable>
-      <FootprintImagePreviewModal uri={previewImage} onClose={() => setPreviewImage(null)} />
+      <FootprintImagePreviewModal
+        initialIndex={preview?.index ?? 0}
+        items={preview?.items ?? []}
+        onClose={() => setPreview(null)}
+      />
     </ScreenShell>
   );
 }

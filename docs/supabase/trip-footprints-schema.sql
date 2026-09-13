@@ -1,3 +1,6 @@
+-- 注意：image_url / image_urls 已退役（2026-09-13）。
+-- 图片现在由 asset 承担：Storage 对象 + trip_sync_items 里的资产元数据项。
+-- 旧字段的历史数据已回填成资产项并删列，见 trip-footprints-retire-image-columns.sql。
 create table if not exists public.trip_footprints (
   id text primary key,
   user_id uuid not null references auth.users(id) on delete cascade,
@@ -6,8 +9,6 @@ create table if not exists public.trip_footprints (
   visit_date text not null default '',
   notes text,
   rating numeric,
-  image_url text,
-  image_urls jsonb,
   created_at timestamptz not null,
   updated_at timestamptz not null,
   deleted_at timestamptz

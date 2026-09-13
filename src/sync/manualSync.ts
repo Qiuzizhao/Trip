@@ -1,23 +1,19 @@
-import { listFootprintsForSync, markFootprintFailed, replaceFootprintsFromSync, type FootprintItem } from '@/src/local/repositories/footprintsRepository';
+// 手动同步（资产模型版）：
+//   1) 记录级：trip_footprints 只同步元数据（图片不再随记录走）
+//   2) 修复：历史上的 0 字节对象按 asset 重传（每个账号只跑一次）
+//   3) 资产级：blob -> Storage + <assetId>.md 元数据项；远端有元数据而本地缺图时下载恢复
+//   4) 合并远端记录
+import { listAllAssets } from '@/src/local/repositories/assetRepository';
+import { isLocalOnlyMode } from '@/src/local/repositories/appSettingsRepository';
+import { migrateFootprintImagesToAssets } from '@/src/local/repositories/assetMigration';
+import { listFootprintsForSync, replaceFootprintsFromSync, type FootprintItem } from '@/src/local/repositories/footprintsRepository';
 import { getSyncMetadata, saveSyncMetadata } from '@/src/local/syncMetadataRepository';
-import { uploadFootprintImagesForSync } from './footprintImageStorage';
+import { repairEmptyAssetObjects } from './assetRepair';
+import { runAssetSync } from './assetQueue';
 import { mergeSyncRecords } from './syncMerge';
+import { createSupabaseFileApi, SUPABASE_SYNC_TARGET_ID } from './supabase/fileApiFactory';
+import { createSupabaseSyncBackend } from './supabase/syncBackend';
 import { getCurrentSession, getSupabaseClient, isSupabaseConfigured } from './supabaseClient';
-
-type RemoteFootprint = {
-  id: string;
-  user_id: string;
-  location: string;
-  coordinate: string | null;
-  visit_date: string;
-  notes: string | null;
-  rating: number | null;
-  image_url: string | null;
-  image_urls: string[] | null;
-  created_at: string;
-  updated_at: string;
-  deleted_at: string | null;
-};
 
 export type ManualSyncResult =
   | {
@@ -27,22 +23,14 @@ export type ManualSyncResult =
       status: 'synced';
       uploadedFootprints: number;
       downloadedFootprints: number;
+      repairedAssetObjects: number;
+      uploadedAssets: number;
+      downloadedAssets: number;
+      failedAssets: number;
       syncedAt: string;
     };
 
-function imageList(values?: unknown, fallback?: unknown) {
-  const list = Array.isArray(values)
-    ? values
-    : typeof values === 'string'
-      ? [values]
-      : typeof fallback === 'string'
-        ? [fallback]
-        : [];
-  return Array.from(new Set(list.map((value) => String(value || '').trim()).filter(Boolean)));
-}
-
-function toRemoteFootprint(footprint: FootprintItem, userId: string): RemoteFootprint {
-  const images = imageList(footprint.image_urls, footprint.image_url);
+function toRemoteFootprint(footprint: FootprintItem, userId: string) {
   return {
     id: footprint.id,
     user_id: userId,
@@ -51,34 +39,50 @@ function toRemoteFootprint(footprint: FootprintItem, userId: string): RemoteFoot
     visit_date: String(footprint.visit_date || ''),
     notes: footprint.notes ? String(footprint.notes) : null,
     rating: typeof footprint.rating === 'number' ? footprint.rating : null,
-    image_url: images[0] || null,
-    image_urls: images.length ? images : null,
     created_at: footprint.created_at,
     updated_at: footprint.updated_at,
     deleted_at: footprint.deleted_at ?? null,
   };
 }
 
-function toLocalFootprint(footprint: RemoteFootprint): FootprintItem {
+function toLocalFootprint(footprint: Record<string, unknown>): FootprintItem {
   return {
-    id: footprint.id,
-    location: footprint.location,
-    coordinate: footprint.coordinate,
-    visit_date: footprint.visit_date,
-    notes: footprint.notes,
-    rating: footprint.rating,
-    image_url: footprint.image_url,
-    image_urls: footprint.image_urls ?? null,
-    created_at: footprint.created_at,
-    updated_at: footprint.updated_at,
-    deleted_at: footprint.deleted_at,
+    id: String(footprint.id),
+    location: String(footprint.location ?? ''),
+    coordinate: (footprint.coordinate as string | null) ?? null,
+    visit_date: String(footprint.visit_date ?? ''),
+    notes: (footprint.notes as string | null) ?? null,
+    rating: (footprint.rating as number | null) ?? null,
+    created_at: String(footprint.created_at),
+    updated_at: String(footprint.updated_at),
+    deleted_at: (footprint.deleted_at as string | null) ?? null,
     sync_status: 'synced',
   };
+}
+
+// 历史上传 bug 留下的 0 字节对象：按 asset 重传（新命名用资产自己的文件，旧命名按对象名里的 hash 反查）。
+// 每次同步都跑：开销只是「每个目录一次 list」，但能自愈
+// （曾经的「只跑一次」标记会在资产尚未从服务器同步下来时被过早置位，导致永远不再修复）。
+async function repairAssetObjectsOnce() {
+  try {
+    const result = await repairEmptyAssetObjects({
+      backend: createSupabaseSyncBackend(),
+      assets: await listAllAssets(),
+    });
+    return result.repaired;
+  } catch {
+    // 修复失败不允许影响同步
+    return 0;
+  }
 }
 
 export async function runManualSync(): Promise<ManualSyncResult> {
   if (!isSupabaseConfigured()) {
     throw new Error('还没有配置 Supabase。请设置 EXPO_PUBLIC_SUPABASE_URL 和 EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY。');
+  }
+
+  if (await isLocalOnlyMode()) {
+    throw new Error('本地模式已开启：图片只保存在本机，不会上传。可在「设置 → 本地模式」中关闭。');
   }
 
   const session = await getCurrentSession();
@@ -87,54 +91,70 @@ export async function runManualSync(): Promise<ManualSyncResult> {
   const supabase = getSupabaseClient();
   const userId = session.user.id;
   const syncedAt = new Date().toISOString();
+
+  // 先确保历史记录已迁移成 asset（幂等），否则首次同步会先清掉本地的 image_urls 镜像
+  await migrateFootprintImagesToAssets().catch(() => undefined);
+
   const localFootprints = await listFootprintsForSync();
-  const pendingFootprints = localFootprints.filter((footprint) => footprint.sync_status === 'pending' || footprint.sync_status === 'failed');
-  const uploadReadyFootprints: FootprintItem[] = [];
-  const failedFootprintIds = new Set<string>();
+  const pendingFootprints = localFootprints.filter(
+    (footprint) => footprint.sync_status === 'pending' || footprint.sync_status === 'failed',
+  );
 
-  for (const footprint of pendingFootprints) {
-    try {
-      uploadReadyFootprints.push(await uploadFootprintImagesForSync({ footprint, userId, supabase }));
-    } catch {
-      failedFootprintIds.add(footprint.id);
-      await markFootprintFailed(footprint.id);
-    }
-  }
-
-  if (uploadReadyFootprints.length > 0) {
+  // 1) 记录级同步（只含元数据）
+  if (pendingFootprints.length > 0) {
     const { error } = await supabase
       .from('trip_footprints')
-      .upsert(uploadReadyFootprints.map((footprint) => toRemoteFootprint(footprint, userId)), { onConflict: 'id' });
+      .upsert(pendingFootprints.map((footprint) => toRemoteFootprint(footprint, userId)), { onConflict: 'id' });
     if (error) throw error;
   }
 
+  // 2) 资产级同步
+  let assetResult = {
+    uploaded: 0,
+    published: 0,
+    downloaded: 0,
+    failed: 0,
+    deleted: 0,
+    touchedFootprintIds: [] as string[],
+  };
+  try {
+    const fileApi = await createSupabaseFileApi();
+    assetResult = await runAssetSync({ fileApi, userId, syncTargetId: SUPABASE_SYNC_TARGET_ID });
+  } catch {
+    // 资产队列整体不可用时（未登录/网络异常），保留记录级同步结果
+  }
+
+  // 3) 老数据修复（放在资产同步之后：这样刚从服务器同步下来的资产也能参与修复）
+  const repairedAssetObjects = await repairAssetObjectsOnce();
+
+  // 4) 拉取远端记录并合并
   const { data: remoteFootprintsData, error: remoteFootprintsError } = await supabase
     .from('trip_footprints')
-    .select('id,user_id,location,coordinate,visit_date,notes,rating,image_url,image_urls,created_at,updated_at,deleted_at')
+    .select('id,user_id,location,coordinate,visit_date,notes,rating,created_at,updated_at,deleted_at')
     .eq('user_id', userId);
   if (remoteFootprintsError) throw remoteFootprintsError;
 
-  const remoteFootprints = ((remoteFootprintsData ?? []) as RemoteFootprint[]).map(toLocalFootprint);
-  const uploadReadyById = new Map(uploadReadyFootprints.map((footprint) => [footprint.id, footprint]));
+  const remoteFootprints = ((remoteFootprintsData ?? []) as Record<string, unknown>[]).map(toLocalFootprint);
+  const pendingById = new Map(pendingFootprints.map((footprint) => [footprint.id, footprint]));
   const mergedFootprints = mergeSyncRecords(
     localFootprints.map((footprint) => ({
-      ...(uploadReadyById.get(footprint.id) ?? footprint),
-      sync_status: failedFootprintIds.has(footprint.id)
-        ? 'failed' as const
-        : uploadReadyById.has(footprint.id)
-          ? 'synced' as const
-          : footprint.sync_status,
+      ...(pendingById.get(footprint.id) ?? footprint),
+      sync_status: pendingById.has(footprint.id) ? 'synced' as const : footprint.sync_status,
     })),
     remoteFootprints,
-  ).map((footprint) => ({ ...footprint, sync_status: footprint.sync_status === 'failed' ? 'failed' as const : 'synced' as const }));
+  ).map((footprint) => ({ ...footprint, sync_status: 'synced' as const }));
 
   await replaceFootprintsFromSync(mergedFootprints);
   await saveSyncMetadata({ ...(await getSyncMetadata()), last_synced_at: syncedAt });
 
   return {
     status: 'synced',
-    uploadedFootprints: uploadReadyFootprints.length,
+    uploadedFootprints: pendingFootprints.length,
     downloadedFootprints: remoteFootprints.length,
+    repairedAssetObjects,
+    uploadedAssets: assetResult.uploaded,
+    downloadedAssets: assetResult.downloaded,
+    failedAssets: assetResult.failed,
     syncedAt,
   };
 }

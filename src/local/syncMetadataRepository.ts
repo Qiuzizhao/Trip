@@ -5,6 +5,8 @@ const defaultSyncMetadata: SyncMetadata = { last_synced_at: null };
 
 export type SyncMetadata = {
   last_synced_at: string | null;
+  // Set once images uploaded by older versions (0-byte objects) have been checked.
+  images_verified_at?: string | null;
 };
 
 export async function getSyncMetadata() {

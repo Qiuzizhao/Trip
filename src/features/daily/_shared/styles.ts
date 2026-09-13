@@ -138,6 +138,8 @@ export const styles = StyleSheet.create({
   footprintNotesInput: { minHeight: 72, paddingTop: spacing.md },
   footprintImageGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs, marginTop: spacing.xs },
   footprintImageTile: { backgroundColor: colors.border, borderRadius: radius.lg, height: 104, overflow: 'hidden', position: 'relative', width: '31.8%' },
+  pendingBadge: { alignItems: 'center', backgroundColor: colors.warningSoft, borderRadius: radius.full, flexDirection: 'row', gap: 3, paddingHorizontal: 6, paddingVertical: 1 },
+  pendingBadgeText: { color: colors.warning, fontSize: 11, fontWeight: '700' },
   footprintImageTileLarge: { height: 170, width: '100%' },
   footprintImageCountBadge: { alignItems: 'center', backgroundColor: 'rgba(15,23,42,0.72)', borderRadius: radius.full, height: 28, justifyContent: 'center', minWidth: 28, paddingHorizontal: spacing.sm, position: 'absolute', right: 8, top: 8 },
   footprintImageCountText: { color: '#fff', fontSize: 13, fontWeight: '700' },

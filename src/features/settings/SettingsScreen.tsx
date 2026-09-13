@@ -1,13 +1,37 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
-import React from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 
+import {
+  defaultAppSettings,
+  getAppSettings,
+  subscribeAppSettings,
+  updateAppSettings,
+  type AppSettings,
+} from '@/src/local/repositories/appSettingsRepository';
 import { Header, IconButton, Screen } from '@/src/shared/components';
 import { colors, radius, shadow, spacing, useThemeColors } from '@/src/shared/theme';
 
 export function SettingsScreen() {
   const themeColors = useThemeColors();
+  const [settings, setSettings] = useState<AppSettings>(defaultAppSettings);
+
+  useEffect(() => {
+    let mounted = true;
+    void getAppSettings().then((next) => {
+      if (mounted) setSettings(next);
+    });
+    const unsubscribe = subscribeAppSettings((next) => setSettings(next));
+    return () => {
+      mounted = false;
+      unsubscribe();
+    };
+  }, []);
+
+  const toggleLocalOnly = (value: boolean) => {
+    void updateAppSettings({ localOnlyMode: value }).then(setSettings);
+  };
 
   return (
     <Screen>
@@ -27,6 +51,21 @@ export function SettingsScreen() {
             </View>
             <Ionicons name="chevron-forward" size={19} color={colors.muted} />
           </Pressable>
+          <View style={styles.settingRow}>
+            <View style={[styles.settingIconWrap, { backgroundColor: colors.surfaceMuted }]}>
+              <Ionicons name="cloud-offline-outline" size={22} color={themeColors.primary} />
+            </View>
+            <View style={styles.settingRowText}>
+              <Text style={styles.helperTitle}>本地模式</Text>
+              <Text style={styles.helperText}>图片只保存在本机，不再上传；同步入口会隐藏</Text>
+            </View>
+            <Switch
+              accessibilityLabel="本地模式"
+              onValueChange={toggleLocalOnly}
+              trackColor={{ false: colors.border, true: themeColors.primary }}
+              value={settings.localOnlyMode}
+            />
+          </View>
           <View style={styles.bottomSpacer} />
         </ScrollView>
       </View>

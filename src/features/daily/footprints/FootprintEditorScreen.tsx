@@ -8,6 +8,8 @@ import { DateField, Field, PrimaryButton, SheetTextInput, StateView } from '@/sr
 import { buildAssetUrl } from '@/src/shared/api';
 import { colors } from '@/src/shared/theme';
 import { createFootprintCached, deleteFootprintCached, listFootprintsLocal, updateFootprintCached } from '@/src/local/repositories/footprintsRepository';
+import { rebuildAssetsForFootprint } from '@/src/local/repositories/assetSync';
+import { mirrorUrisForFootprint } from '@/src/local/repositories/assetSync';
 import { styles } from '../_shared/styles';
 import { Item, ScreenShell, confirmRemove, today } from '../_shared/ReplicatedScreens';
 import { FootprintImagePreviewModal } from './FootprintImagePreviewModal';
@@ -92,9 +94,10 @@ export function FootprintEditorScreen({
   const [loading, setLoading] = useState(Boolean(isEditing));
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const [previewImage, setPreviewImage] = useState<string | null>(null);
+  const [previewIndex, setPreviewIndex] = useState<number | null>(null);
   const title = isEditing ? '编辑足迹' : '记录新足迹';
   const canSave = useMemo(() => Boolean(form.location.trim()) && !saving, [form.location, saving]);
+  const previewItems = useMemo(() => form.image_urls.map((uri) => ({ uri })), [form.image_urls]);
 
   useEffect(() => {
     if (!isEditing || typeof footprintId !== 'string') return;
@@ -102,13 +105,16 @@ export function FootprintEditorScreen({
     setLoading(true);
     setError(null);
     void findFootprintById(footprintId)
-      .then((item) => {
+      .then(async (item) => {
         if (!mounted) return;
         if (!item) {
           setError('没有找到这条足迹');
           return;
         }
-        setForm(formFromItem(item));
+        // 图片来自 asset（记录里不再存图片字段）
+        const assetUris = await mirrorUrisForFootprint(String(item.id));
+        if (!mounted) return;
+        setForm({ ...formFromItem(item), image_urls: assetUris });
       })
       .catch((err) => {
         if (mounted) setError(err instanceof Error ? err.message : '加载足迹失败');
@@ -151,17 +157,25 @@ export function FootprintEditorScreen({
     setSaving(true);
     try {
       const imageUrls = imageList(form.image_urls);
-      const payload = {
+      // 记录只写元数据：图片全部由 asset 承担
+      const basePayload = {
         location: form.location.trim(),
         coordinate: form.coordinate.trim() || null,
         visit_date: form.visit_date,
         notes: form.notes.trim() || null,
         rating: 5,
-        image_url: imageUrls[0] || null,
-        image_urls: imageUrls.length ? imageUrls : null,
       };
-      if (isEditing && typeof footprintId === 'string') await updateFootprintCached(footprintId, payload);
-      else await createFootprintCached(payload);
+
+      // 先写记录拿到 id，再把图片对齐到 asset（本地文件会改名为 <assetId>.<ext>）
+      let savedId: string;
+      if (isEditing && typeof footprintId === 'string') {
+        savedId = footprintId;
+        await updateFootprintCached(savedId, basePayload);
+      } else {
+        savedId = (await createFootprintCached(basePayload)).id;
+      }
+
+      await rebuildAssetsForFootprint(savedId, imageUrls);
       onBack();
     } catch (err) {
       Alert.alert('保存失败', err instanceof Error ? err.message : '足迹保存失败，请稍后重试。');
@@ -233,7 +247,7 @@ export function FootprintEditorScreen({
                       <Pressable
                         accessibilityLabel="放大足迹照片"
                         accessibilityRole="imagebutton"
-                        onPress={() => setPreviewImage(displayUri)}
+                        onPress={() => setPreviewIndex(index)}
                         style={{ flex: 1 }}
                       >
                         <CachedFootprintImage uri={displayUri} style={{ height: '100%', width: '100%' }} />
@@ -291,7 +305,11 @@ export function FootprintEditorScreen({
           </>
         ) : null}
       </ScrollView>
-      <FootprintImagePreviewModal uri={previewImage} onClose={() => setPreviewImage(null)} />
+      <FootprintImagePreviewModal
+        initialIndex={previewIndex ?? 0}
+        items={previewIndex === null ? [] : previewItems}
+        onClose={() => setPreviewIndex(null)}
+      />
     </ScreenShell>
   );
 }

@@ -1,5 +1,6 @@
 import type { Item } from '@/src/features/daily/_shared/ReplicatedScreens';
 import { prefetchFootprintImages } from '@/src/features/daily/footprints/imageCache';
+import { migrateFootprintImagesToAssets } from './repositories/assetMigration';
 import { listFootprintsLocal } from './repositories/footprintsRepository';
 
 export const homePreloadKeys = {
@@ -37,6 +38,8 @@ export function prewarmFootprintScreenData() {
     const items = await listFootprintsLocal();
     setPreloadedData(homePreloadKeys.footprints, items);
     prefetchFootprintImages(items);
+    // 一次性迁移：把历史 image_urls 变成 asset 行（幂等，失败不影响预热）
+    void migrateFootprintImagesToAssets().catch(() => undefined);
     return items;
   });
 }

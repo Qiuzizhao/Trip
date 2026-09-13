@@ -12,13 +12,13 @@
       "supportsTablet": true,
       "appleTeamId": "FAGAB6KML3",
       "bundleIdentifier": "com.qiuzizhao.tripfootprints",
-      "buildNumber": "12",
+      "buildNumber": "13",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
-      "versionCode": 12,
+      "versionCode": 13,
       "adaptiveIcon": {
         "backgroundColor": "#FFFFFF",
         "foregroundImage": "./assets/images/app-icon-trip-white-route-v2.png"

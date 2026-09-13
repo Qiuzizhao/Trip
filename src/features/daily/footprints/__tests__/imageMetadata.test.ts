@@ -1,6 +1,13 @@
 import { describe, expect, it } from '@jest/globals';
 
-import { formatTakenAt, parseExifDateTime, readTakenAtFromBytes } from '../imageMetadata';
+import {
+  dateStringFromTakenAt,
+  formatTakenDate,
+  formatTakenAt,
+  parseExifDateTime,
+  readTakenAtFromBytes,
+  takenAtOptions,
+} from '../imageMetadata';
 
 // 构造一个最小的 JPEG（SOI + APP1/Exif + EOI），IFD0 里放 DateTime。
 // 用来验证「真实 EXIF 字节 → 时间戳」这条链路，而不是只测正则。
@@ -79,5 +86,59 @@ describe('formatTakenAt', () => {
     expect(formatTakenAt(undefined)).toBeNull();
     expect(formatTakenAt(0)).toBeNull();
     expect(formatTakenAt(Number.NaN)).toBeNull();
+  });
+});
+
+describe('dateStringFromTakenAt', () => {
+  it('按本地时间给出 YYYY-MM-DD，不会因 UTC 偏移掉到前一天', () => {
+    // 东八区凌晨：toISOString() 会变成前一天，这里必须还是 5 号
+    expect(dateStringFromTakenAt(new Date(2026, 8, 5, 0, 30).getTime())).toBe('2026-09-05');
+    expect(dateStringFromTakenAt(new Date(2026, 11, 31, 23, 59).getTime())).toBe('2026-12-31');
+  });
+});
+
+describe('formatTakenDate', () => {
+  it('格式化成 年月日', () => {
+    expect(formatTakenDate(new Date(2026, 8, 5, 17, 56).getTime())).toBe('2026年9月5日');
+    expect(formatTakenDate(new Date(2026, 11, 31, 9, 5).getTime())).toBe('2026年12月31日');
+  });
+});
+
+describe('takenAtOptions', () => {
+  const at = (y: number, m: number, d: number, h: number, min: number, s = 0) =>
+    new Date(y, m - 1, d, h, min, s).getTime();
+
+  it('按日期先后排序，气泡只显示日期', () => {
+    expect(takenAtOptions([at(2026, 9, 6, 9, 12), at(2026, 9, 5, 17, 56)])).toEqual([
+      { takenAt: at(2026, 9, 5, 17, 56), date: '2026-09-05', label: '2026年9月5日' },
+      { takenAt: at(2026, 9, 6, 9, 12), date: '2026-09-06', label: '2026年9月6日' },
+    ]);
+  });
+
+  it('同一天的多张照片只留一个气泡，并用当天最早的一张排序', () => {
+    const options = takenAtOptions([
+      at(2026, 9, 5, 17, 56, 7),
+      at(2026, 9, 5, 9, 12, 30),
+    ]);
+    expect(options).toHaveLength(1);
+    expect(options[0]).toEqual({
+      takenAt: at(2026, 9, 5, 9, 12, 30),
+      date: '2026-09-05',
+      label: '2026年9月5日',
+    });
+  });
+
+  it('跨天时按日期先后排列', () => {
+    const options = takenAtOptions([
+      at(2026, 9, 6, 8, 0),
+      at(2026, 9, 5, 23, 30),
+      at(2026, 9, 6, 19, 45),
+    ]);
+    expect(options.map((option) => option.date)).toEqual(['2026-09-05', '2026-09-06']);
+  });
+
+  it('跳过读不到时间的照片，全读不到时返回空数组', () => {
+    expect(takenAtOptions([null, undefined, Number.NaN])).toEqual([]);
+    expect(takenAtOptions([null, at(2026, 9, 5, 17, 56)])).toHaveLength(1);
   });
 });

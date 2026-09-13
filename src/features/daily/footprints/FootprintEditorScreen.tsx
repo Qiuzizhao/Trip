@@ -6,7 +6,7 @@ import { Alert, Pressable, ScrollView, Text, View, type StyleProp } from 'react-
 
 import { DateField, Field, PrimaryButton, SheetTextInput, StateView } from '@/src/shared/components';
 import { buildAssetUrl } from '@/src/shared/api';
-import { colors } from '@/src/shared/theme';
+import { colors, spacing } from '@/src/shared/theme';
 import { createFootprintCached, deleteFootprintCached, listFootprintsLocal, updateFootprintCached } from '@/src/local/repositories/footprintsRepository';
 import { rebuildAssetsForFootprint } from '@/src/local/repositories/assetSync';
 import { mirrorUrisForFootprint } from '@/src/local/repositories/assetSync';
@@ -14,6 +14,7 @@ import { styles } from '../_shared/styles';
 import { Item, ScreenShell, confirmRemove, today } from '../_shared/ReplicatedScreens';
 import { FootprintImagePreviewModal } from './FootprintImagePreviewModal';
 import { persistFootprintImageUri } from './footprintImageFiles';
+import { readTakenAtFromFile, takenAtOptions } from './imageMetadata';
 
 const footprintEditorImageSourceCache = new Map<string, ImageSource>();
 
@@ -95,9 +96,38 @@ export function FootprintEditorScreen({
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [previewIndex, setPreviewIndex] = useState<number | null>(null);
+  // uri -> 拍摄时间（毫秒）；读不到记 null，避免重复读同一个文件
+  const [takenAtByUri, setTakenAtByUri] = useState<Record<string, number | null>>({});
   const title = isEditing ? '编辑足迹' : '记录新足迹';
   const canSave = useMemo(() => Boolean(form.location.trim()) && !saving, [form.location, saving]);
   const previewItems = useMemo(() => form.image_urls.map((uri) => ({ uri })), [form.image_urls]);
+  const takenAtChoices = useMemo(
+    () => takenAtOptions(form.image_urls.map((uri) => takenAtByUri[uri])),
+    [form.image_urls, takenAtByUri],
+  );
+
+  // 加了照片就顺手读一次 EXIF，把可以一键填入的拍摄时间找出来
+  useEffect(() => {
+    // 只读本地文件：编辑模式下图片可能只有远端 URL，不为读元数据把原图整张下载下来
+    const pending = form.image_urls.filter((uri) => takenAtByUri[uri] === undefined && uri.startsWith('file://'));
+    if (!pending.length) return;
+
+    let cancelled = false;
+    void Promise.all(
+      pending.map(async (uri) => [uri, await readTakenAtFromFile(uri).catch(() => null)] as const),
+    ).then((entries) => {
+      if (cancelled) return;
+      setTakenAtByUri((current) => {
+        const next = { ...current };
+        for (const [uri, takenAt] of entries) next[uri] = takenAt;
+        return next;
+      });
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [form.image_urls, takenAtByUri]);
 
   useEffect(() => {
     if (!isEditing || typeof footprintId !== 'string') return;
@@ -225,6 +255,27 @@ export function FootprintEditorScreen({
               value={form.visit_date}
               onChangeText={(value) => setForm((current) => ({ ...current, visit_date: value || today() }))}
             />
+            {takenAtChoices.length ? (
+              <View style={{ marginTop: -spacing.md }}>
+                <Text style={styles.formLabel}>照片拍摄日期</Text>
+                <View style={styles.pills}>
+                  {takenAtChoices.map((option) => {
+                    const selected = option.date === form.visit_date;
+                    return (
+                      <Pressable
+                        key={option.takenAt}
+                        accessibilityLabel={`把日期填成 ${option.label}`}
+                        accessibilityRole="button"
+                        onPress={() => setForm((current) => ({ ...current, visit_date: option.date }))}
+                        style={[styles.pill, selected && styles.pillSelected]}
+                      >
+                        <Text style={[styles.pillText, selected && styles.pillTextSelected]}>{option.label}</Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              </View>
+            ) : null}
             <View>
               <Text style={styles.formLabel}>记录见闻</Text>
               <SheetTextInput

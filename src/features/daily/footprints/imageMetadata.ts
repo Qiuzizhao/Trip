@@ -92,3 +92,48 @@ export function formatTakenAt(takenAt?: number | null) {
   const pad = (value: number) => String(value).padStart(2, '0');
   return `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日 ${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
+
+/**
+ * 毫秒时间戳 → 表单用的本地日期字符串（YYYY-MM-DD）。
+ * 和 `today()` / `visit_date` 同格式；刻意不走 toISOString——那是 UTC，东八区凌晨的照片会掉到前一天。
+ */
+export function dateStringFromTakenAt(takenAt: number): string {
+  const date = new Date(takenAt);
+  const pad = (value: number) => String(value).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+
+/** 气泡文案用的本地日期：2026年9月5日 */
+export function formatTakenDate(takenAt: number): string {
+  const date = new Date(takenAt);
+  return `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日`;
+}
+
+export type TakenAtOption = {
+  /** 这一天最早一张的毫秒时间戳，用于排序 */
+  takenAt: number;
+  /** 可直接写入 visit_date 的 YYYY-MM-DD */
+  date: string;
+  /** 气泡文案，如 2026年9月5日 */
+  label: string;
+};
+
+/**
+ * 把一组照片的拍摄时间整理成可点选的候选：
+ * 读不到时间的丢掉、**按日期去重**（同一天的照片只留一个气泡）、按日期先后排序。
+ */
+export function takenAtOptions(times: Array<number | null | undefined>): TakenAtOption[] {
+  const unique = new Map<string, TakenAtOption>();
+  for (const takenAt of times) {
+    if (typeof takenAt !== 'number' || !Number.isFinite(takenAt)) continue;
+    const date = dateStringFromTakenAt(takenAt);
+    const existing = unique.get(date);
+    // 同一天只保留一个气泡，取当天最早的那张作为排序依据
+    if (existing) {
+      if (takenAt < existing.takenAt) existing.takenAt = takenAt;
+      continue;
+    }
+    unique.set(date, { takenAt, date, label: formatTakenDate(takenAt) });
+  }
+  return Array.from(unique.values()).sort((a, b) => a.takenAt - b.takenAt);
+}

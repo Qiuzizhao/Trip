@@ -16,7 +16,6 @@ import { Gallery } from 'react-native-zoom-toolkit';
 
 import { spacing } from '@/src/shared/theme';
 import type { PreviewImage } from './assetResolver';
-import { thumbnailUrlFor } from './imageCache';
 import { formatTakenAt, readTakenAtFromFile } from './imageMetadata';
 import { createVerticalPullHandler } from './previewGestures';
 
@@ -31,12 +30,6 @@ type FootprintImagePreviewModalProps = {
   /** 左右滑动切图后回调（用于「下载当前图片」这类跟随当前图的操作） */
   onIndexChange?: (index: number) => void;
 };
-
-// 远端原图用服务端缩略图做占位（列表里已经缓存过，能立刻出图）；本地文件或非本桶地址不需要占位
-function placeholderFor(uri: string) {
-  const thumbnailUri = thumbnailUrlFor(uri);
-  return thumbnailUri === uri ? undefined : { uri: thumbnailUri };
-}
 
 export function FootprintImagePreviewModal({
   action,
@@ -149,7 +142,6 @@ export function FootprintImagePreviewModal({
                   onError={() => {
                     setFailedUris((previous) => ({ ...previous, [uri]: (previous[uri] ?? 0) + 1 }));
                   }}
-                  placeholder={placeholderFor(uri)}
                   placeholderContentFit={contentFit}
                   priority="high"
                   source={{ uri }}

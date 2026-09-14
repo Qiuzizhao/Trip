@@ -1,47 +1,27 @@
 // This screen renders footprint records which contain image_urls
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
-import { Image as ExpoImage, type ImageStyle } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { FlatList, InteractionManager, Pressable, Text, View, TextInput, StyleSheet, type StyleProp } from 'react-native';
+import { FlatList, InteractionManager, Pressable, Text, View, TextInput, StyleSheet } from 'react-native';
 
 import { StateView } from '@/src/shared/components';
 import { colors, spacing } from '@/src/shared/theme';
 import { getPreloadedData, homePreloadKeys, setPreloadedData } from '@/src/local/homePreload';
+import { isLocalOnlyMode, subscribeAppSettings } from '@/src/local/repositories/appSettingsRepository';
 import { listFootprintIdsWithPendingAssets, subscribeAssetsLocal } from '@/src/local/repositories/assetRepository';
 import { listFootprintsLocal, subscribeFootprintsLocal } from '@/src/local/repositories/footprintsRepository';
 import { styles } from '../_shared/styles';
 import { Item, ScreenShell, SectionCard, Tag } from '../_shared/ReplicatedScreens';
 import { FootprintImagePreviewModal } from './FootprintImagePreviewModal';
+import { FootprintThumbnail } from './FootprintThumbnail';
 import { resolveFootprintImageUris, type PreviewImage } from './assetResolver';
 import { collectTagCounts, itemHasTag, normalizeTags } from './footprintTags';
 import { tagColorFor } from './tagColors';
-import { footprintDisplayImageUri, footprintImageUris, imageSourceFor, prefetchFootprintImages, thumbnailUrlFor } from './imageCache';
+import { footprintDisplayImageUri, footprintImageUris, prefetchFootprintImages } from './imageCache';
 
 /** 卡片上最多直接显示的标签数，多出来的折成 +N */
 const MAX_VISIBLE_TAGS = 3;
-
-function CachedFootprintImage({
-  uri,
-  style,
-  contentFit = 'cover',
-}: {
-  uri: string;
-  style: StyleProp<ImageStyle>;
-  contentFit?: 'cover' | 'contain';
-}) {
-  return (
-    <ExpoImage
-      cachePolicy="memory-disk"
-      contentFit={contentFit}
-      priority="high"
-      source={imageSourceFor(uri)}
-      style={style}
-      transition={0}
-    />
-  );
-}
 
 export function FootprintScreen({
   onBack,
@@ -64,6 +44,8 @@ export function FootprintScreen({
   const [activeTag, setActiveTag] = useState<string | null>(null);
   const [preview, setPreview] = useState<{ items: PreviewImage[]; index: number } | null>(null);
   const [pendingAssetIds, setPendingAssetIds] = useState<Set<string>>(() => new Set());
+  // 本地模式下图片只留在本机，不存在「待同步」这回事，也不再显示对应标记
+  const [localOnly, setLocalOnly] = useState(false);
   const [resolvedAssetUris, setResolvedAssetUris] = useState<Record<string, string[]>>({});
 
   const stats = useMemo(() => {
@@ -104,11 +86,13 @@ export function FootprintScreen({
   const load = useCallback(async () => {
     setError(null);
     try {
+      const localOnlyMode = await isLocalOnlyMode();
+      setLocalOnly(localOnlyMode);
       const localItems = await listFootprintsLocal();
       setPreloadedData(homePreloadKeys.footprints, localItems);
       prefetchFootprintImages(localItems);
       setItems(localItems);
-      setPendingAssetIds(await listFootprintIdsWithPendingAssets());
+      setPendingAssetIds(localOnlyMode ? new Set() : await listFootprintIdsWithPendingAssets());
       await refreshResolvedAssetUris(localItems);
     } catch (err) {
       setError(err instanceof Error ? err.message : '加载足迹失败');
@@ -124,21 +108,31 @@ export function FootprintScreen({
     }, [load]),
   );
 
+  // 设置页里开关本地模式后，列表上的「图片待同步」要立刻跟着消失/恢复
+  useEffect(() => subscribeAppSettings((settings) => {
+    setLocalOnly(settings.localOnlyMode);
+    if (settings.localOnlyMode) setPendingAssetIds(new Set());
+  }), []);
+
   useEffect(() => subscribeFootprintsLocal((nextItems) => {
     setPreloadedData(homePreloadKeys.footprints, nextItems);
     prefetchFootprintImages(nextItems);
     setItems(nextItems);
     void refreshResolvedAssetUris(nextItems);
-    void listFootprintIdsWithPendingAssets().then(setPendingAssetIds).catch(() => undefined);
-  }), [refreshResolvedAssetUris]);
+    if (!localOnly) {
+      void listFootprintIdsWithPendingAssets().then(setPendingAssetIds).catch(() => undefined);
+    }
+  }), [refreshResolvedAssetUris, localOnly]);
 
   // 资产变化（上传成功/下载完成/失败标记）也要刷新，否则新增记录在 asset 建立前就被解析成空
   useEffect(() => subscribeAssetsLocal(() => {
     void listFootprintsLocal()
       .then((nextItems) => refreshResolvedAssetUris(nextItems))
       .catch(() => undefined);
-    void listFootprintIdsWithPendingAssets().then(setPendingAssetIds).catch(() => undefined);
-  }), [refreshResolvedAssetUris]);
+    if (!localOnly) {
+      void listFootprintIdsWithPendingAssets().then(setPendingAssetIds).catch(() => undefined);
+    }
+  }), [refreshResolvedAssetUris, localOnly]);
 
   return (
     <ScreenShell title="足迹" onBack={onBack} onSettings={onSettings} rightAction={rightAction}>
@@ -227,7 +221,7 @@ export function FootprintScreen({
         maxToRenderPerBatch={6}
         renderItem={({ item }) => {
           const images = resolvedAssetUris[String(item.id)] ?? footprintImageUris(item);
-          const hasPendingAssets = pendingAssetIds.has(String(item.id));
+          const hasPendingAssets = !localOnly && pendingAssetIds.has(String(item.id));
           const tags = normalizeTags(item.tags);
           const visibleTags = tags.slice(0, MAX_VISIBLE_TAGS);
           return (
@@ -293,7 +287,7 @@ export function FootprintScreen({
                                 }}
                                 style={{ flex: 1 }}
                               >
-                                <CachedFootprintImage uri={thumbnailUrlFor(displayUri)} style={{ height: '100%', width: '100%' }} />
+                                <FootprintThumbnail uri={displayUri} style={{ height: '100%', width: '100%' }} />
                               </Pressable>
                               {isLastVisible && hasMore ? (
                                 <View

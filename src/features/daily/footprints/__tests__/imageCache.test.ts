@@ -1,24 +1,31 @@
 import { describe, expect, it } from '@jest/globals';
 
-import { thumbnailUrlFor } from '../imageCache';
+import { footprintDisplayImageUri, footprintImageUris } from '../imageCache';
 
-const PUBLIC_URL = 'https://supabase.example.com/storage/v1/object/public/trip-footprint-images/user-1/fp-1/1-abc.png';
+// 说明：列表/相册/编辑页现在统一用原图地址（不再走服务端 imgproxy），
+// 所以这里只覆盖地址的组装规则。
 
-describe('thumbnailUrlFor', () => {
-  it('把 Storage 公共 URL 换成 imgproxy 缩略图地址', () => {
-    expect(thumbnailUrlFor(PUBLIC_URL)).toBe(
-      'https://supabase.example.com/storage/v1/render/image/public/trip-footprint-images/user-1/fp-1/1-abc.png?width=400&quality=70',
-    );
+describe('footprintImageUris', () => {
+  it('image_urls 优先，兼容单值 image_url', () => {
+    expect(footprintImageUris({ id: 'a', image_urls: ['u1', 'u2'] })).toEqual(['u1', 'u2']);
+    expect(footprintImageUris({ id: 'a', image_url: 'u1' })).toEqual(['u1']);
+    // image_urls 是数组时以它为准（空数组也不会回落到 image_url，这是既有行为）
+    expect(footprintImageUris({ id: 'a', image_urls: [], image_url: 'u1' })).toEqual([]);
   });
 
-  it('保留原有查询参数（例如修复后加的版本号）', () => {
-    expect(thumbnailUrlFor(`${PUBLIC_URL}?v=abc123`)).toBe(
-      'https://supabase.example.com/storage/v1/render/image/public/trip-footprint-images/user-1/fp-1/1-abc.png?width=400&quality=70&v=abc123',
-    );
+  it('去重、去空、去首尾空格', () => {
+    expect(footprintImageUris({ id: 'a', image_urls: ['u1', ' u1 ', '', 'u2'] })).toEqual(['u1', 'u2']);
   });
 
-  it('本地文件与非本桶地址原样返回', () => {
-    expect(thumbnailUrlFor('file:///app/Documents/trip-footprint-images/a.png')).toBe('file:///app/Documents/trip-footprint-images/a.png');
-    expect(thumbnailUrlFor('https://example.com/a.png')).toBe('https://example.com/a.png');
+  it('没有图片时返回空数组', () => {
+    expect(footprintImageUris({ id: 'a' })).toEqual([]);
+  });
+});
+
+describe('footprintDisplayImageUri', () => {
+  it('原样返回可用地址（相对 key 也交给上层处理）', () => {
+    expect(footprintDisplayImageUri('https://example.com/a.png')).toBe('https://example.com/a.png');
+    expect(footprintDisplayImageUri('file:///app/a.png')).toBe('file:///app/a.png');
+    expect(footprintDisplayImageUri('3c7c8470/assets/a.heic')).toBe('3c7c8470/assets/a.heic');
   });
 });

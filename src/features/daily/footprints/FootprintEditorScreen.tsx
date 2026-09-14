@@ -1,8 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
-import { Image as ExpoImage, type ImageSource, type ImageStyle } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
 import React, { useEffect, useMemo, useState } from 'react';
-import { Alert, Pressable, ScrollView, Text, View, type StyleProp } from 'react-native';
+import { Alert, Pressable, ScrollView, Text, View } from 'react-native';
 
 import { DateField, Field, PrimaryButton, SheetTextInput, StateView } from '@/src/shared/components';
 import { buildAssetUrl } from '@/src/shared/api';
@@ -13,12 +12,11 @@ import { mirrorUrisForFootprint } from '@/src/local/repositories/assetSync';
 import { styles } from '../_shared/styles';
 import { Item, ScreenShell, confirmRemove, today } from '../_shared/ReplicatedScreens';
 import { FootprintImagePreviewModal } from './FootprintImagePreviewModal';
+import { FootprintThumbnail } from './FootprintThumbnail';
 import { persistFootprintImageUri } from './footprintImageFiles';
 import { collectTagCounts, formatTagsInput, normalizeTags, parseTagInput } from './footprintTags';
 import { tagColorFor } from './tagColors';
 import { readTakenAtFromFile, takenAtOptions } from './imageMetadata';
-
-const footprintEditorImageSourceCache = new Map<string, ImageSource>();
 
 type FootprintForm = {
   location: string;
@@ -33,35 +31,6 @@ type FootprintForm = {
 function imageList(values?: string[] | string | null, fallback?: string | null) {
   const list = Array.isArray(values) ? values : typeof values === 'string' ? [values] : fallback ? [fallback] : [];
   return Array.from(new Set(list.map((value) => String(value || '').trim()).filter(Boolean)));
-}
-
-function imageSourceFor(uri: string) {
-  const cached = footprintEditorImageSourceCache.get(uri);
-  if (cached) return cached;
-  const source = /^https?:\/\//i.test(uri) ? { uri, cacheKey: uri } : { uri };
-  footprintEditorImageSourceCache.set(uri, source);
-  return source;
-}
-
-function CachedFootprintImage({
-  uri,
-  style,
-  contentFit = 'cover',
-}: {
-  uri: string;
-  style: StyleProp<ImageStyle>;
-  contentFit?: 'cover' | 'contain';
-}) {
-  return (
-    <ExpoImage
-      cachePolicy="memory-disk"
-      contentFit={contentFit}
-      priority="high"
-      source={imageSourceFor(uri)}
-      style={style}
-      transition={0}
-    />
-  );
 }
 
 function footprintImageUris(item: Item) {
@@ -348,7 +317,7 @@ export function FootprintEditorScreen({
                         onPress={() => setPreviewIndex(index)}
                         style={{ flex: 1 }}
                       >
-                        <CachedFootprintImage uri={displayUri} style={{ height: '100%', width: '100%' }} />
+                        <FootprintThumbnail uri={displayUri} style={{ height: '100%', width: '100%' }} />
                       </Pressable>
                       <Pressable
                         accessibilityLabel="移除照片"

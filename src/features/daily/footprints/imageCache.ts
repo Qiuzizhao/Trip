@@ -14,21 +14,6 @@ export function footprintDisplayImageUri(uri: string) {
   return buildAssetUrl(uri) || uri;
 }
 
-// 列表/相册用服务端缩略图（imgproxy 已开启），本地文件保持原样。
-// object/public/... -> render/image/public/...?width=&quality=
-export function thumbnailUrlFor(uri: string, width = 400, quality = 70) {
-  const marker = '/storage/v1/object/public/';
-  const markerIndex = uri.indexOf(marker);
-  if (markerIndex < 0) return uri;
-
-  const base = uri.slice(0, markerIndex);
-  const rest = uri.slice(markerIndex + marker.length);
-  const [key, query] = rest.split('?');
-  const params = [`width=${width}`, `quality=${quality}`];
-  if (query) params.push(query);
-  return `${base}/storage/v1/render/image/public/${key}?${params.join('&')}`;
-}
-
 export function imageSourceFor(uri: string) {
   const cached = footprintImageSourceCache.get(uri);
   if (cached) return cached;
@@ -37,9 +22,13 @@ export function imageSourceFor(uri: string) {
   return source;
 }
 
+// 图片统一用原图地址：服务端 imgproxy 解不了 10 位 HDR HEIC（返回 422），
+// 而本地模式下本来就是直接读本地文件、由 expo-image 缩放显示，
+// 所以干脆三个页面都用同一个地址，缓存也能共用。详见 docs/footprint-thumbnails.md
 export function prefetchFootprintImages(items: Item[]) {
   const remoteUris = items
     .flatMap(footprintImageUris)
+    // 预取的和列表/相册真正显示的地址是一回事（都是原图），否则预取了也用不上
     .map(footprintDisplayImageUri)
     .filter((uri) => /^https?:\/\//i.test(uri))
     .filter((uri) => {

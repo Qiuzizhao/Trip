@@ -1,7 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
-import { Image as ExpoImage, type ImageSource, type ImageStyle } from 'expo-image';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Alert, FlatList, Pressable, StyleSheet, Text, View, type StyleProp } from 'react-native';
+import { Alert, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { ScreenShell, Item, Tag } from '../_shared/ReplicatedScreens';
 import { colors, radius, spacing, shadow } from '@/src/shared/theme';
@@ -10,44 +9,14 @@ import { listFootprintsLocal } from '@/src/local/repositories/footprintsReposito
 import { StateView } from '@/src/shared/components';
 import { shareFootprintImage } from './download';
 import { FootprintImagePreviewModal } from './FootprintImagePreviewModal';
+import { FootprintThumbnail } from './FootprintThumbnail';
 import { resolveFootprintImages, type PreviewImage } from './assetResolver';
 import { normalizeTags } from './footprintTags';
 import { tagColorFor } from './tagColors';
 
-const footprintAlbumImageSourceCache = new Map<string, ImageSource>();
-
 function imageList(values?: string[] | string | null, fallback?: string | null) {
   const list = Array.isArray(values) ? values : typeof values === 'string' ? [values] : fallback ? [fallback] : [];
   return Array.from(new Set(list.map((value) => String(value || '').trim()).filter(Boolean)));
-}
-
-function imageSourceFor(uri: string) {
-  const cached = footprintAlbumImageSourceCache.get(uri);
-  if (cached) return cached;
-  const source = /^https?:\/\//i.test(uri) ? { uri, cacheKey: uri } : { uri };
-  footprintAlbumImageSourceCache.set(uri, source);
-  return source;
-}
-
-function CachedFootprintImage({
-  uri,
-  style,
-  contentFit = 'cover',
-}: {
-  uri: string;
-  style: StyleProp<ImageStyle>;
-  contentFit?: 'cover' | 'contain';
-}) {
-  return (
-    <ExpoImage
-      cachePolicy="memory-disk"
-      contentFit={contentFit}
-      priority="high"
-      source={imageSourceFor(uri)}
-      style={style}
-      transition={0}
-    />
-  );
 }
 
 function footprintImageUris(item: Item) {
@@ -166,7 +135,7 @@ export function FootprintAlbumScreen({
                     style={albumStyles.photoTile}
                     onPress={() => setFullIndex(index)}
                   >
-                    <CachedFootprintImage uri={displayUri} style={albumStyles.photoImage} />
+                    <FootprintThumbnail uri={displayUri} style={albumStyles.photoImage} />
                   </Pressable>
                 );
               }}

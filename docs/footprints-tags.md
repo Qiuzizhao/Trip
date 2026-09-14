@@ -63,6 +63,5 @@ alter table public.trip_footprints
 
 ## 已知限制
 
-- 服务端 imgproxy 无法处理 HEIC：`/storage/v1/render/image/...` 返回 `422 Invalid source image`，
-  所以列表/相册里 HEIC 照片的缩略图会加载失败（原图直链正常，JPEG/PNG 不受影响）。
-  要修需要客户端本地生成缩略图、或上传时额外存一张 JPEG、或给 imgproxy 加 HEIC 支持。
+- 图片统一用原图地址显示（不再走服务端的 `render/image` 缩略图接口），
+  原因与取舍见 `docs/footprint-thumbnails.md`。

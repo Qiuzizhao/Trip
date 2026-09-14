@@ -123,12 +123,85 @@ const snapDuration = clamp(snapDistance / Math.max(Math.abs(velocity), 300) * 10
 
 调用处把 `e.velocityX` 传进 `onSwipe` 与 `snapToScrollPosition`（TS 源码与 `lib/module` 编译产物同时改）。
 
-**下拉关闭**：以前松手后库会先把图片 `withTiming(0)` 弹回原位，紧接着 Modal 淡出 ——
-看起来像"先弹回去、再消失"。现在（`previewGestures.ts`）用一个共享值 `pull` 记录下拉位移：
+**下拉关闭（2026-09-14 重做）**：以前是"整个预览层一起变淡 + 缩小"，看起来像一张黑纸慢慢化掉，
+用户反馈"既然下滑了，黑背景就该消失，只留照片在动"。现在拆成三层（`FootprintImagePreviewModal`）：
 
-- 拖动过程中实时把位移写进去，预览容器同步变淡（最多淡到 30%）、轻微缩小 —— 跟手；
-- 松手且超过阈值：顺着松手方向**再走一段**（170ms）后才真正关闭，像是在把图"甩出去"；
-- 松手但没到阈值：220ms 顺滑回位。
+- **黑色背板单独一层**：`pull`（下拉位移）驱动它淡到全透明（240pt 内淡完），露出下面的列表；
+- **照片层**：跟手下滑由 Gallery 负责，这一层只叠加"松手甩出去"的那一段位移（`exitOffset`，120pt / 170ms）；
+- **控件层**（计数 / 拍摄时间 / 关闭 / 横屏 / 下载）：140pt 内先淡出。
+
+松手超过阈值（80pt）：背板继续淡到底 + 照片顺势再走一段（170ms）后关闭；
+没到阈值：220ms 顺滑回位。
+`pull` 与 `exitOffset` **每次打开预览都清零**（共享值活在组件上，Modal 关闭不会卸载它），
+否则下次打开会出现"半透明"或"照片停在偏下位置"。
+
+## 三个「卡住 / 半透明」的坑（2026-09-14 修复）
+
+用户报的三个现象是同一个手势状态机漏掉收尾的不同表现：
+
+1. **左右滑不动**：库在 `onStart` 用**起手瞬间的速度**判断这次手势是不是下拉
+   （`Math.abs(e.velocityY) > Math.abs(e.velocityX)`）。这个值是噪声很大的瞬时量，
+   横滑起手带一点点下压就会被判成纵向，而库里 `onEnd` 为了不让下拉误触发翻页，
+   会传 `translate.x = 100` 让横向判定必定失败 —— 整条横向手势被吞掉。
+   现在改成**锁轴**：手势前 12px 的实际位移决定这是横滑还是下拉，方向只定一次
+   （横滑照旧走 scroll，下拉才进 pull 分支）。
+2. **重开预览是半透明 + 缩小 6%**：驱动容器透明度/缩放的共享值 `pull` 活在
+   `FootprintImagePreviewModal` 上，而 Modal 关闭**不会卸载这个组件** ——
+   下拉收起留下的位移一直留着，下次打开就是 `opacity 1 - pull/320*0.7` 的半透明状态。
+   现在每次「打开预览」都在渲染期把 `pull` 归零。
+3. **下拉到一半卡住、图片半透明、底下列表透出来**：关不关以前挂在 `withTiming` 的
+   `finished` 回调上。动画一旦被打断（新手势写 `pull`、GestureHandler 被取消），
+   回调带 `finished = false` 回来，`onClose` 就永远不会触发，预览永久停在下拉一半。
+   现在 UI 线程只负责动画，**关闭由 JS 侧按同样时长兜底**（`requestClose` →
+   `setTimeout(onClose, 170)`），动画被打断也一定会关掉。
+
+配套的库补丁（`react-native-zoom-toolkit+5.1.1.patch`）还有两处收尾：
+
+- 手势被**取消**时 RNGH 只回调 `onFinalize`、不回调 `onEnd`（第二根手指落下让
+  `maxPointers(1)` 失败、并发的捏合/双击把 pan 置成 disabled 都会这样）。
+  补丁在 `onFinalize` 里补一次收尾：超过阈值就通知使用方关闭，没到就把位移弹回去。
+- 每次手势开始都重置 `pullReleased` / `pullHandled` 标志位 —— 原来这两个是"只置不清"的
+  闩锁，第二次下拉松手时值没变化，`useAnimatedReaction` 不再回调，松手事件整个丢失。
+
+另外修掉一个「手势永久失效」的隐患：捏合回弹动画被打断时，库里
+`gesturesEnabled` 会永久停在 `false`（pan / tap / pinch 全禁用，预览再也滑不动）。
+补丁改成不管动画是否被打断都恢复开关，并把「关」排在 `cancelAnimation` 之后。
+回归测试：`__tests__/previewGestures.test.ts`、`__tests__/gallerySwipePatch.test.ts`
+（直接读 `node_modules` 源码断言补丁在不在，补丁丢了就红）。
+
+## 左右滑动翻页：App 侧兜底（2026-09-14）
+
+库里翻页是"先播 `scroll` 动画、动画结束才改 `activeIndex`"。新架构下这次布局重算会再走一遍
+`measureRoot`，而它原本**无条件**把 `scroll` 写回当前页 —— 正在播的动画被打断
+（`finished=false` 直接 return），表现就是"滑过去又弹回来、计数不变"（左右滑不动）。
+
+两层修复：
+
+1. 补丁：`measureRoot` 只有尺寸真的变了才写 `scroll`（`Gallery.js` / `Gallery.tsx`）；
+2. App 兜底：`onSwipe` 里记下预期下标，460ms 内 `onIndexChange` 没到就直接
+   `galleryRef.setIndex()` 翻过去 —— 动画正常时兜底会被 `onIndexChange` 清掉。
+
+另外把"打开预览那一下的抬手"过滤掉（`openedAtRef`）：否则那一下会被 Gallery 当成单击，
+预览刚打开就被关掉（表现为"点缩略图没反应，要点两次"）。
+
+### 真触摸验收（这台机器上可行的方法）
+
+Device Hub 里合成鼠标事件**不会**变成应用内拖拽（点击、系统边缘手势可以），
+所以手感/手势类改动要用 XCUITest 注入真触摸：
+
+```bash
+# 一次性生成一个最小 UI Test 工程（XcodeGen），再跑：
+xcodebuild test -project TripUIAutomation.xcodeproj -scheme TripUITests \
+  -destination 'platform=iOS Simulator,id=<UDID>' -derivedDataPath /tmp/trip-ui-dd \
+  -only-testing:TripUITests/PreviewGestureTests
+```
+
+用例里用 `press(forDuration:thenDragTo:)` 做真实拖拽，并采样截图像素判断"背板是否不透明"。
+注意模拟器里装的是 **Release 包（内置 main.jsbundle）**：改完 JS 必须
+`xcodebuild -workspace ios/Trip.xcworkspace -scheme Trip -configuration Release -sdk iphonesimulator`
+重新构建再 `simctl install`，改 Metro 没用。
+
+当前 4 条用例全绿：左右翻页、打开不透明、下拉关闭+重开不透明、小幅下拉回弹。
 
 ## 横屏查看的实现要点
 
@@ -186,8 +259,12 @@ const snapDuration = clamp(snapDistance / Math.max(Math.abs(velocity), 300) * 10
 
 ## 验证情况
 
-- `npx tsc --noEmit` 0 错误；`npx jest` 40 通过；无未使用代码。
-- 模拟器（iPhone 18 Pro / iOS 27）实测：预览正常渲染（全屏图片 + `1 / 3` 计数 + 关闭按钮）。
+- `npx tsc --noEmit` 0 错误；`npx jest` 97 通过（含补丁守护测试）。
+- 模拟器（iPhone 18 Pro / iOS 27）实测：预览正常渲染（全屏图片 + 计数 + 关闭按钮）。
+- 2026-09-14 修「左右滑不动 / 重开半透明 / 下拉卡一半」时，除了单测，
+  还确认了 **Metro 真的把补丁打进包**：`curl` 拉 `/.expo/.virtual-metro-entry.bundle`
+  后能查到 `PAN_AXIS_LOCK_DISTANCE` / `releasePull` 且已没有 `isVerticalPan`，
+  再 deep link 重载 App 无红屏 —— 注意包用的是 `lib/module` 产物（不是 `src`）。
 - **手势手感需要真机确认**：这台机器的模拟器（Device Hub）不接受合成触摸事件，脚本无法模拟捏合/滑动；请在手机上体验。
 - 已随 **1.0.6 (9)** 上传到 App Store Connect。
 

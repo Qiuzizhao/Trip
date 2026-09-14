@@ -1,3 +1,38 @@
+diff --git a/node_modules/react-native-zoom-toolkit/lib/module/commons/hooks/usePinchCommons.js b/node_modules/react-native-zoom-toolkit/lib/module/commons/hooks/usePinchCommons.js
+index 2cf393c..7345b5c 100644
+--- a/node_modules/react-native-zoom-toolkit/lib/module/commons/hooks/usePinchCommons.js
++++ b/node_modules/react-native-zoom-toolkit/lib/module/commons/hooks/usePinchCommons.js
+@@ -60,13 +60,14 @@ export const usePinchCommons = options => {
+   const onPinchStart = e => {
+     'worklet';
+ 
+-    scheduleOnRN(switchGesturesState, false);
+     if (userCallbacks.onPinchStart !== undefined) {
+       scheduleOnRN(userCallbacks.onPinchStart, e);
+     }
+     cancelAnimation(translate.x);
+     cancelAnimation(translate.y);
+     cancelAnimation(scale);
++    // Trip patch: 先取消动画、再关手势（被打断的 reset 回调会恢复手势，这个"关"要排在后面）
++    scheduleOnRN(switchGesturesState, false);
+     initialFocal.x.value = currentFocal.x.value;
+     initialFocal.y.value = currentFocal.y.value;
+     origin.x.value = e.focalX - container.width.value / 2;
+@@ -123,10 +124,10 @@ export const usePinchCommons = options => {
+     const toValue = areTXNotEqual || areTYNotEqual || areScalesNotEqual ? 1 : 0;
+     translate.x.value = withTiming(toX);
+     translate.y.value = withTiming(toY);
+-    scale.value = withTiming(toScale, undefined, finished => {
+-      if (finished) {
+-        scheduleOnRN(switchGesturesState, true);
+-      }
++    // Trip patch: 不管回弹动画是否被打断都要恢复手势（原版只在 finished 时恢复，
++    // 一旦被打断 gesturesEnabled 会永久停在 false，预览再也滑不动）
++    scale.value = withTiming(toScale, undefined, () => {
++      scheduleOnRN(switchGesturesState, true);
+     });
+     gestureEnd.value = withTiming(toValue, undefined, finished => {
+       // Only re-arm the gimmick on a genuine finish. Writing gestureEnd.value
 diff --git a/node_modules/react-native-zoom-toolkit/lib/module/commons/utils/getSwipeDirection.js b/node_modules/react-native-zoom-toolkit/lib/module/commons/utils/getSwipeDirection.js
 index 4098a9e..c9b44d3 100644
 --- a/node_modules/react-native-zoom-toolkit/lib/module/commons/utils/getSwipeDirection.js
@@ -37,20 +72,75 @@ index 4098a9e..c9b44d3 100644
    const inLeftBound = translate.x === -1 * boundX;
    if (swipeLeft && inLeftBound) return 'left';
    const swipeUp = e.velocityY <= -1 * SWIPE_VELOCITY && swipedDistanceY && swipedInTime;
+diff --git a/node_modules/react-native-zoom-toolkit/lib/module/components/gallery/Gallery.js b/node_modules/react-native-zoom-toolkit/lib/module/components/gallery/Gallery.js
+index da2f746..2af7505 100644
+--- a/node_modules/react-native-zoom-toolkit/lib/module/components/gallery/Gallery.js
++++ b/node_modules/react-native-zoom-toolkit/lib/module/components/gallery/Gallery.js
+@@ -81,13 +81,24 @@ const Gallery = props => {
+       width,
+       height
+     } = e.nativeEvent.layout;
++    // Trip patch: 只有尺寸真的变了才写 scroll。
++    // 新架构下每次重渲染都可能再走一遍 onLayout，无条件写 scroll 会把正在播放的
++    // 翻页动画打断（withTiming 回调收到 finished=false 就直接 return），
++    // 结果就是"滑过去又弹回来、计数不变" —— 也就是左右滑不动。
++    const sizeChanged = width !== rootSize.width.value || height !== rootSize.height.value;
++
++    // 尺寸没变就整个跳过：写 rootSize 会触发下面的 useAnimatedReaction（它会把 scroll
++    // 写回当前页），正在播放的翻页动画就被打断 —— 表现是"滑过去、闪一下又回到原图"。
++    if (!sizeChanged) {
++      return;
++    }
++    rootSize.width.set(width);
++    rootSize.height.set(height);
+     const scrollPosition = getScrollPosition({
+       index: activeIndex.get(),
+       itemSize: vertical ? height : width,
+       gap
+     });
+-    rootSize.width.set(width);
+-    rootSize.height.set(height);
+     scroll.set(scrollPosition);
+   };
+   const animatedStyles = useAnimatedStyle(() => ({
+@@ -124,6 +135,8 @@ const Gallery = props => {
+     onIndexChange && scheduleOnRN(onIndexChange, value);
+     scheduleOnRN(setScrollIndex, value);
+   }, [activeIndex]);
++  // Trip patch: 这个 reaction 会在 rootSize 写入时把 scroll 写回当前页（打断翻页动画），
++  // 所以上面 measureRoot 已经保证"尺寸没变就不写 rootSize"。
+   useAnimatedReaction(() => ({
+     vertical,
+     size: {
 diff --git a/node_modules/react-native-zoom-toolkit/lib/module/components/gallery/GalleryGestureHandler.js b/node_modules/react-native-zoom-toolkit/lib/module/components/gallery/GalleryGestureHandler.js
-index 3bbf4a4..b1d8726 100644
+index 3bbf4a4..e12f36a 100644
 --- a/node_modules/react-native-zoom-toolkit/lib/module/components/gallery/GalleryGestureHandler.js
 +++ b/node_modules/react-native-zoom-toolkit/lib/module/components/gallery/GalleryGestureHandler.js
-@@ -14,6 +14,8 @@ import { GalleryContext } from "./context.js";
+@@ -14,6 +14,13 @@ import { GalleryContext } from "./context.js";
  import { getScrollPosition } from "../../commons/utils/getScrollPosition.js";
  import { jsx as _jsx } from "react/jsx-runtime";
  const minScale = 1;
 +// Trip patch: 下拉超过这个距离就"不收回去"，由使用方接着做收起动画并关闭
 +const VERTICAL_PULL_KEEP_THRESHOLD = 80;
++// Trip patch: 手势前 12px 的实际位移用来"锁轴"（横滑 / 下拉只定一次）
++const PAN_AXIS_LOCK_DISTANCE = 12;
++const PAN_AXIS_UNKNOWN = 0;
++const PAN_AXIS_HORIZONTAL = 1;
++const PAN_AXIS_VERTICAL = 2;
  /*
   * Pinchable views are really heavy components, therefore in order to maximize performance
   * only a single pinchable view is shared among all the list items, items listen to this
-@@ -100,7 +102,7 @@ const GalleryGestureHandler = ({
+@@ -66,6 +73,9 @@ const GalleryGestureHandler = ({
+   const gestureEnd = useSharedValue(0);
+   const isPullingVertical = useSharedValue(false);
+   const pullReleased = useSharedValue(false);
++  // Trip patch: 本次手势锁到哪个轴（未知 / 横向 / 纵向），以及下拉是否已经收尾过一次
++  const panAxis = useSharedValue(PAN_AXIS_UNKNOWN);
++  const pullHandled = useSharedValue(false);
+   const horizontalScrollDirection = rtl ? -1 : 1;
+   const boundsFn = optionalScale => {
+     'worklet';
+@@ -100,7 +110,7 @@ const GalleryGestureHandler = ({
  
    // This funcions controls the snapping of the gallery's items when panning
    // For instance if you slowly pan and let go the item
@@ -59,7 +149,7 @@ index 3bbf4a4..b1d8726 100644
      'worklet';
  
      cancelAnimation(scroll);
-@@ -120,9 +122,14 @@ const GalleryGestureHandler = ({
+@@ -120,9 +130,14 @@ const GalleryGestureHandler = ({
        gap
      });
  
@@ -76,7 +166,7 @@ index 3bbf4a4..b1d8726 100644
        if (!finished) return;
        if (toScroll !== current) {
          activeIndex.value += toScroll === next ? 1 : -1;
-@@ -131,7 +138,7 @@ const GalleryGestureHandler = ({
+@@ -131,9 +146,14 @@ const GalleryGestureHandler = ({
        toScroll !== current && reset(0, 0, minScale, false);
      });
    };
@@ -84,8 +174,15 @@ index 3bbf4a4..b1d8726 100644
 +  const onSwipe = (swipeDirection, velocity = 0) => {
      'worklet';
  
++    // Trip patch: 翻页动画改由 App 接管（App 用 onSwipe 回调自己做滑入滑出）。
++    // 库里这套"先播 scroll 动画、动画结束才改 activeIndex"在新架构下会被布局重算
++    // 打断（回弹、闪烁、计数不变），所以这里不再动 scroll / activeIndex。
++    return;
++
      cancelAnimation(scroll);
-@@ -152,7 +159,13 @@ const GalleryGestureHandler = ({
+     let toIndex = activeIndex.value;
+     if (swipeDirection === 'up' && vertical) toIndex += 1;
+@@ -152,7 +172,13 @@ const GalleryGestureHandler = ({
        itemSize: itemSize.value,
        gap
      });
@@ -100,7 +197,84 @@ index 3bbf4a4..b1d8726 100644
        if (!finished) {
          return;
        }
-@@ -273,6 +286,7 @@ const GalleryGestureHandler = ({
+@@ -161,6 +187,25 @@ const GalleryGestureHandler = ({
+       reset(0, 0, minScale, false);
+     });
+   };
++
++  // Trip patch: 下拉松手的统一收尾。正常松手走 onEnd，手势被取消走 onFinalize。
++  // 只有它会把 pullHandled 置真 —— 保证一次下拉只会收尾一次。
++  const releasePull = () => {
++    'worklet';
++    pullHandled.value = true;
++    // 先置 released：下面的 reaction 只在 isPullingVertical 为真时回调 onVerticalPull，
++    // 所以这里不能顺手把 isPullingVertical 置回 false，否则"松手关闭"整个丢失。
++    pullReleased.value = true;
++
++    // 超过阈值：保持位移不弹回，交给使用方（previewGestures）把收起动画走完再关闭
++    if (translate.y.value > VERTICAL_PULL_KEEP_THRESHOLD) {
++      return;
++    }
++    translate.y.value = withTiming(0, undefined, finished => {
++      isPullingVertical.value = !finished;
++      pullReleased.value = !finished;
++    });
++  };
+   useAnimatedReaction(() => ({
+     translate: translate.y.value,
+     isPulling: isPullingVertical.value,
+@@ -237,8 +282,12 @@ const GalleryGestureHandler = ({
+     if (onPanStart !== undefined) {
+       scheduleOnRN(onPanStart, e);
+     }
+-    const isVerticalPan = Math.abs(e.velocityY) > Math.abs(e.velocityX);
+-    isPullingVertical.value = isVerticalPan && scale.value === 1 && !vertical;
++    // Trip patch: 方向不再用「起手瞬间的速度」猜（噪声大，会把横向滑动整条吞掉），
++    // 改成在 onUpdate 里按实际位移锁轴，方向只定一次。
++    panAxis.value = PAN_AXIS_UNKNOWN;
++    pullHandled.value = false;
++    pullReleased.value = false;
++    isPullingVertical.value = false;
+     isScrolling.value = true;
+ 
+     // @ts-ignore
+@@ -251,9 +300,34 @@ const GalleryGestureHandler = ({
+   }).onUpdate(e => {
+     if (isPullingVertical.value) {
+       velocityY.value = e.velocityY;
+-      translate.y.value = e.translationY;
++      // Trip patch: 只跟手向下（向上没有内容可露出来）
++      translate.y.value = Math.max(0, e.translationY);
+       return;
+     }
++    // Trip patch: 锁轴 —— 纵向先到 12px 才承认是下拉，横向则走原来的滑动路径
++    if (panAxis.value === PAN_AXIS_UNKNOWN) {
++      const movedX = Math.abs(e.translationX);
++      const movedY = Math.abs(e.translationY);
++      if (movedX >= PAN_AXIS_LOCK_DISTANCE || movedY >= PAN_AXIS_LOCK_DISTANCE) {
++        if (movedY > movedX) {
++          panAxis.value = PAN_AXIS_VERTICAL;
++          if (!vertical && scale.value === 1 && e.translationY > 0) {
++            isPullingVertical.value = true;
++            velocityY.value = e.velocityY;
++            translate.y.value = e.translationY;
++            // 锁轴前那一两像素的横向位移可能已经把 scroll 推偏了，回到当前页
++            scroll.value = getScrollPosition({
++              index: activeIndex.value,
++              itemSize: itemSize.value,
++              gap
++            });
++            return;
++          }
++        } else {
++          panAxis.value = PAN_AXIS_HORIZONTAL;
++        }
++      }
++    }
+     const toX = offset.x.value + e.translationX;
+     const toY = offset.y.value + e.translationY;
+     const {
+@@ -273,6 +347,7 @@ const GalleryGestureHandler = ({
      const bounds = boundsFn(scale.value);
      const direction = getSwipeDirection(e, {
        boundaries: bounds,
@@ -108,7 +282,7 @@ index 3bbf4a4..b1d8726 100644
        time: time.value,
        position: {
          x: position.x.value,
-@@ -286,13 +300,19 @@ const GalleryGestureHandler = ({
+@@ -286,19 +361,15 @@ const GalleryGestureHandler = ({
      const canSwipeHorizontal = !vertical && (direction === 'left' || direction === 'right');
      const canSwipeVertical = vertical && (direction === 'up' || direction === 'down');
      if (canSwipeHorizontal || canSwipeVertical) {
@@ -118,18 +292,22 @@ index 3bbf4a4..b1d8726 100644
      if (direction !== undefined && onUserSwipe !== undefined) {
        scheduleOnRN(onUserSwipe, direction);
      }
-     if (isPullingVertical.value) {
-       pullReleased.value = true;
-+      // Trip patch: 超过阈值时保持位移（不弹回原位）。
-+      // 注意不能在这里把 isPullingVertical 置回 false —— 下面的 reaction 只在
-+      // isPulling 为真时才回调 onVerticalPull，置回 false 会让"松手关闭"丢失。
-+      if (Math.abs(translate.y.value) > VERTICAL_PULL_KEEP_THRESHOLD) {
+-    if (isPullingVertical.value) {
+-      pullReleased.value = true;
+-      translate.y.value = withTiming(0, undefined, finished => {
+-        isPullingVertical.value = !finished;
+-        pullReleased.value = !finished;
+-      });
+-      return;
+-    }
++      if (isPullingVertical.value) {
++        releasePull();
 +        return;
 +      }
-       translate.y.value = withTiming(0, undefined, finished => {
-         isPullingVertical.value = !finished;
-         pullReleased.value = !finished;
-@@ -307,7 +327,7 @@ const GalleryGestureHandler = ({
+     const isSwipingH = direction === 'left' || direction === 'right';
+     const isSwipingV = direction === 'up' || direction === 'down';
+     const snapV = vertical && (direction === undefined || isSwipingH);
+@@ -307,7 +378,7 @@ const GalleryGestureHandler = ({
        scheduleOnRN(onPanEnd, e);
      }
      if (snapV || snapH) {
@@ -138,6 +316,59 @@ index 3bbf4a4..b1d8726 100644
      }
      const configX = {
        velocity: e.velocityX,
+@@ -328,6 +399,13 @@ const GalleryGestureHandler = ({
+     });
+     translate.x.value = withDecay(configX);
+     translate.y.value = withDecay(configY);
++  }).onFinalize(() => {
++    // Trip patch: 手势被取消时（并发的捏合/双击把 pan 置成 disabled、或第二根手指落下
++    // 让 maxPointers(1) 失败）RNGH 只回调 onFinalize、不回调 onEnd —— 下拉位移和
++    // "松手"事件就再也发不出去，预览会永久卡在下拉一半的半透明状态。这里补一次收尾。
++    if (isPullingVertical.value && !pullHandled.value) {
++      releasePull();
++    }
+   });
+   const tap = Gesture.Tap().withTestId('tap').enabled(gesturesEnabled).numberOfTaps(1).maxDuration(250).onEnd(event => {
+     const gallerySize = {
+diff --git a/node_modules/react-native-zoom-toolkit/src/commons/hooks/usePinchCommons.ts b/node_modules/react-native-zoom-toolkit/src/commons/hooks/usePinchCommons.ts
+index 2e933f3..05b9eef 100644
+--- a/node_modules/react-native-zoom-toolkit/src/commons/hooks/usePinchCommons.ts
++++ b/node_modules/react-native-zoom-toolkit/src/commons/hooks/usePinchCommons.ts
+@@ -108,7 +108,6 @@ export const usePinchCommons = (options: PinchOptions) => {
+ 
+   const onPinchStart = (e: PinchGestureEvent) => {
+     'worklet';
+-    scheduleOnRN(switchGesturesState, false);
+ 
+     if (userCallbacks.onPinchStart !== undefined) {
+       scheduleOnRN(userCallbacks.onPinchStart, e);
+@@ -117,6 +116,10 @@ export const usePinchCommons = (options: PinchOptions) => {
+     cancelAnimation(translate.x);
+     cancelAnimation(translate.y);
+     cancelAnimation(scale);
++    // Trip patch: 先取消动画、再关手势。
++    // cancelAnimation 会让被打断的那次 reset 回调 finished=false，而补丁把它改成
++    // "不管是否被打断都恢复手势"；这个"关"必须排在它后面，否则刚关就被重新打开。
++    scheduleOnRN(switchGesturesState, false);
+ 
+     initialFocal.x.value = currentFocal.x.value;
+     initialFocal.y.value = currentFocal.y.value;
+@@ -172,10 +175,11 @@ export const usePinchCommons = (options: PinchOptions) => {
+ 
+     translate.x.value = withTiming(toX);
+     translate.y.value = withTiming(toY);
+-    scale.value = withTiming(toScale, undefined, (finished) => {
+-      if (finished) {
+-        scheduleOnRN(switchGesturesState, true);
+-      }
++    // Trip patch: 不管回弹动画是否被打断都要恢复手势。
++    // 原版只在 finished 时恢复，于是「捏合后紧接着双击 / 再捏一次」会让
++    // gesturesEnabled 永久停在 false —— pan / tap / pinch 全被禁用，预览再也滑不动。
++    scale.value = withTiming(toScale, undefined, () => {
++      scheduleOnRN(switchGesturesState, true);
+     });
+ 
+     gestureEnd.value = withTiming(toValue, undefined, (finished) => {
 diff --git a/node_modules/react-native-zoom-toolkit/src/commons/utils/getSwipeDirection.ts b/node_modules/react-native-zoom-toolkit/src/commons/utils/getSwipeDirection.ts
 index 232a61f..c0cb11d 100644
 --- a/node_modules/react-native-zoom-toolkit/src/commons/utils/getSwipeDirection.ts
@@ -191,20 +422,71 @@ index 232a61f..c0cb11d 100644
  
    const inLeftBound = translate.x === -1 * boundX;
    if (swipeLeft && inLeftBound) return 'left';
+diff --git a/node_modules/react-native-zoom-toolkit/src/components/gallery/Gallery.tsx b/node_modules/react-native-zoom-toolkit/src/components/gallery/Gallery.tsx
+index 2f85f6e..32b80dd 100644
+--- a/node_modules/react-native-zoom-toolkit/src/components/gallery/Gallery.tsx
++++ b/node_modules/react-native-zoom-toolkit/src/components/gallery/Gallery.tsx
+@@ -101,14 +101,29 @@ const Gallery = <T,>(props: GalleryPropsWithRef<T>) => {
+ 
+   const measureRoot = (e: LayoutChangeEvent) => {
+     const { width, height } = e.nativeEvent.layout;
++
++    // Trip patch: 只有尺寸真的变了才写 scroll。
++    // 新架构下每次重渲染都可能再走一遍 onLayout，无条件写 scroll 会把正在播放的
++    // 翻页动画打断（withTiming 回调收到 finished=false 就直接 return），
++    // 结果就是"滑过去又弹回来、计数不变" —— 也就是左右滑不动。
++    const sizeChanged =
++      width !== rootSize.width.value || height !== rootSize.height.value;
++
++    // 尺寸没变就整个跳过：写 rootSize 会触发下面的 useAnimatedReaction（它会把 scroll
++    // 写回当前页），正在播放的翻页动画就被打断 —— 表现是"滑过去、闪一下又回到原图"。
++    if (!sizeChanged) {
++      return;
++    }
++
++    rootSize.width.set(width);
++    rootSize.height.set(height);
++
+     const scrollPosition = getScrollPosition({
+       index: activeIndex.get(),
+       itemSize: vertical ? height : width,
+       gap,
+     });
+ 
+-    rootSize.width.set(width);
+-    rootSize.height.set(height);
+     scroll.set(scrollPosition);
+   };
+ 
 diff --git a/node_modules/react-native-zoom-toolkit/src/components/gallery/GalleryGestureHandler.tsx b/node_modules/react-native-zoom-toolkit/src/components/gallery/GalleryGestureHandler.tsx
-index cd4b7bd..2f15ddd 100644
+index cd4b7bd..4bb1af3 100644
 --- a/node_modules/react-native-zoom-toolkit/src/components/gallery/GalleryGestureHandler.tsx
 +++ b/node_modules/react-native-zoom-toolkit/src/components/gallery/GalleryGestureHandler.tsx
-@@ -32,6 +32,8 @@ import { type GalleryProps } from './types';
+@@ -32,6 +32,13 @@ import { type GalleryProps } from './types';
  import { getScrollPosition } from '../../commons/utils/getScrollPosition';
  
  const minScale = 1;
 +// Trip patch: 下拉超过这个距离就"不收回去"，由使用方接着做收起动画并关闭
 +const VERTICAL_PULL_KEEP_THRESHOLD = 80;
++// Trip patch: 手势前 12px 的实际位移用来"锁轴"（横滑 / 下拉只定一次）
++const PAN_AXIS_LOCK_DISTANCE = 12;
++const PAN_AXIS_UNKNOWN = 0;
++const PAN_AXIS_HORIZONTAL = 1;
++const PAN_AXIS_VERTICAL = 2;
  
  type GalleryGestureHandlerProps = {
    length: number;
-@@ -149,7 +151,7 @@ const GalleryGestureHandler = ({
+@@ -115,6 +122,9 @@ const GalleryGestureHandler = ({
+   const gestureEnd = useSharedValue<number>(0);
+   const isPullingVertical = useSharedValue<boolean>(false);
+   const pullReleased = useSharedValue<boolean>(false);
++  // Trip patch: 本次手势锁到哪个轴（未知 / 横向 / 纵向），以及下拉是否已经收尾过一次
++  const panAxis = useSharedValue<number>(PAN_AXIS_UNKNOWN);
++  const pullHandled = useSharedValue<boolean>(false);
+ 
+   const horizontalScrollDirection = rtl ? -1 : 1;
+ 
+@@ -149,7 +159,7 @@ const GalleryGestureHandler = ({
  
    // This funcions controls the snapping of the gallery's items when panning
    // For instance if you slowly pan and let go the item
@@ -213,7 +495,7 @@ index cd4b7bd..2f15ddd 100644
      'worklet';
  
      cancelAnimation(scroll);
-@@ -170,10 +172,20 @@ const GalleryGestureHandler = ({
+@@ -170,10 +180,20 @@ const GalleryGestureHandler = ({
        gap,
      });
  
@@ -236,7 +518,7 @@ index cd4b7bd..2f15ddd 100644
        if (!finished) return;
        if (toScroll !== current) {
          activeIndex.value += toScroll === next ? 1 : -1;
-@@ -184,7 +196,7 @@ const GalleryGestureHandler = ({
+@@ -184,9 +204,14 @@ const GalleryGestureHandler = ({
      });
    };
  
@@ -244,8 +526,15 @@ index cd4b7bd..2f15ddd 100644
 +  const onSwipe = (swipeDirection: SwipeDirection, velocity = 0) => {
      'worklet';
  
++    // Trip patch: 翻页动画改由 App 接管（App 用 onSwipe 回调自己做滑入滑出）。
++    // 库里这套"先播 scroll 动画、动画结束才改 activeIndex"在新架构下会被布局重算
++    // 打断（回弹、闪烁、计数不变），所以这里不再动 scroll / activeIndex。
++    return;
++
      cancelAnimation(scroll);
-@@ -211,9 +223,17 @@ const GalleryGestureHandler = ({
+ 
+     let toIndex = activeIndex.value;
+@@ -211,9 +236,17 @@ const GalleryGestureHandler = ({
        gap,
      });
  
@@ -264,7 +553,92 @@ index cd4b7bd..2f15ddd 100644
        (finished) => {
          if (!finished) {
            return;
-@@ -372,6 +392,7 @@ const GalleryGestureHandler = ({
+@@ -226,6 +259,26 @@ const GalleryGestureHandler = ({
+     );
+   };
+ 
++  // Trip patch: 下拉松手的统一收尾。正常松手走 onEnd，手势被取消走 onFinalize。
++  // 只有它会把 pullHandled 置真 —— 保证一次下拉只会收尾一次。
++  const releasePull = () => {
++    'worklet';
++    pullHandled.value = true;
++    // 先置 released：下面的 reaction 只在 isPullingVertical 为真时回调 onVerticalPull，
++    // 所以这里不能顺手把 isPullingVertical 置回 false，否则"松手关闭"整个丢失。
++    pullReleased.value = true;
++
++    // 超过阈值：保持位移不弹回，交给使用方（previewGestures）把收起动画走完再关闭
++    if (translate.y.value > VERTICAL_PULL_KEEP_THRESHOLD) {
++      return;
++    }
++
++    translate.y.value = withTiming(0, undefined, (finished) => {
++      isPullingVertical.value = !finished;
++      pullReleased.value = !finished;
++    });
++  };
++
+   useAnimatedReaction(
+     () => ({
+       translate: translate.y.value,
+@@ -330,8 +383,14 @@ const GalleryGestureHandler = ({
+         scheduleOnRN(onPanStart, e);
+       }
+ 
+-      const isVerticalPan = Math.abs(e.velocityY) > Math.abs(e.velocityX);
+-      isPullingVertical.value = isVerticalPan && scale.value === 1 && !vertical;
++      // Trip patch: 方向不再用「起手瞬间的速度」猜。那个值是噪声很大的瞬时量：
++      // 想横滑但起手带一点点下压，就会被判成纵向，而库里 onEnd 用 translate.x = 100
++      // 让横向判定必定失败 —— 整条横向手势被吞掉（表现为"左右滑不动"）。
++      // 现在改成在 onUpdate 里按实际位移锁轴，方向只定一次。
++      panAxis.value = PAN_AXIS_UNKNOWN;
++      pullHandled.value = false;
++      pullReleased.value = false;
++      isPullingVertical.value = false;
+       isScrolling.value = true;
+ 
+       // @ts-ignore
+@@ -346,10 +405,39 @@ const GalleryGestureHandler = ({
+     .onUpdate((e) => {
+       if (isPullingVertical.value) {
+         velocityY.value = e.velocityY;
+-        translate.y.value = e.translationY;
++        // Trip patch: 只跟手向下（向上没有内容可露出来）
++        translate.y.value = Math.max(0, e.translationY);
+         return;
+       }
+ 
++      // Trip patch: 锁轴 —— 纵向先到 12px 才承认是下拉，横向则走原来的滑动路径
++      if (panAxis.value === PAN_AXIS_UNKNOWN) {
++        const movedX = Math.abs(e.translationX);
++        const movedY = Math.abs(e.translationY);
++
++        if (movedX >= PAN_AXIS_LOCK_DISTANCE || movedY >= PAN_AXIS_LOCK_DISTANCE) {
++          if (movedY > movedX) {
++            panAxis.value = PAN_AXIS_VERTICAL;
++
++            if (!vertical && scale.value === 1 && e.translationY > 0) {
++              isPullingVertical.value = true;
++              velocityY.value = e.velocityY;
++              translate.y.value = e.translationY;
++              // 锁轴前那一两像素的横向位移可能已经把 scroll 推偏了，回到当前页，
++              // 免得下拉结束后图片留在偏一点点、边上露出黑边的状态
++              scroll.value = getScrollPosition({
++                index: activeIndex.value,
++                itemSize: itemSize.value,
++                gap,
++              });
++              return;
++            }
++          } else {
++            panAxis.value = PAN_AXIS_HORIZONTAL;
++          }
++        }
++      }
++
+       const toX = offset.x.value + e.translationX;
+       const toY = offset.y.value + e.translationY;
+ 
+@@ -372,6 +460,7 @@ const GalleryGestureHandler = ({
        const bounds = boundsFn(scale.value);
        const direction = getSwipeDirection(e, {
          boundaries: bounds,
@@ -272,7 +646,7 @@ index cd4b7bd..2f15ddd 100644
          time: time.value,
          position: { x: position.x.value, y: position.y.value },
          translate: {
-@@ -387,7 +408,7 @@ const GalleryGestureHandler = ({
+@@ -387,7 +476,7 @@ const GalleryGestureHandler = ({
          vertical && (direction === 'up' || direction === 'down');
  
        if (canSwipeHorizontal || canSwipeVertical) {
@@ -281,20 +655,21 @@ index cd4b7bd..2f15ddd 100644
        }
  
        if (direction !== undefined && onUserSwipe !== undefined) {
-@@ -396,6 +417,12 @@ const GalleryGestureHandler = ({
+@@ -395,12 +484,7 @@ const GalleryGestureHandler = ({
+       }
  
        if (isPullingVertical.value) {
-         pullReleased.value = true;
-+        // Trip patch: 超过阈值时保持位移（不弹回原位）。
-+        // 这里不能把 isPullingVertical 置回 false —— 下面的 reaction 只在 isPulling
-+        // 为真时才回调 onVerticalPull，置回 false 会让"松手关闭"丢失。
-+        if (Math.abs(translate.y.value) > VERTICAL_PULL_KEEP_THRESHOLD) {
-+          return;
-+        }
-         translate.y.value = withTiming(0, undefined, (finished) => {
-           isPullingVertical.value = !finished;
-           pullReleased.value = !finished;
-@@ -414,7 +441,7 @@ const GalleryGestureHandler = ({
+-        pullReleased.value = true;
+-        translate.y.value = withTiming(0, undefined, (finished) => {
+-          isPullingVertical.value = !finished;
+-          pullReleased.value = !finished;
+-        });
+-
++        releasePull();
+         return;
+       }
+ 
+@@ -414,7 +498,7 @@ const GalleryGestureHandler = ({
        }
  
        if (snapV || snapH) {
@@ -303,3 +678,18 @@ index cd4b7bd..2f15ddd 100644
        }
  
        const configX = { velocity: e.velocityX, clamp: [-bounds.x, bounds.x] };
+@@ -432,6 +516,14 @@ const GalleryGestureHandler = ({
+ 
+       translate.x.value = withDecay(configX as WithDecayConfig);
+       translate.y.value = withDecay(configY as WithDecayConfig);
++    })
++    .onFinalize(() => {
++      // Trip patch: 手势被取消时（并发的捏合/双击把 pan 置成 disabled、或第二根手指落下
++      // 让 maxPointers(1) 失败）RNGH 只回调 onFinalize、不回调 onEnd —— 下拉位移和
++      // "松手"事件就再也发不出去，预览会永久卡在下拉一半的半透明状态。这里补一次收尾。
++      if (isPullingVertical.value && !pullHandled.value) {
++        releasePull();
++      }
+     });
+ 
+   const tap = Gesture.Tap()

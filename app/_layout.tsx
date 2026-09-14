@@ -25,8 +25,10 @@ export default function RootLayout() {
       <Stack.Screen name="index" />
       <Stack.Screen name="daily/footprint-edit" />
       <Stack.Screen name="daily/footprint-album" />
-      <Stack.Screen name="settings/index" />
-      <Stack.Screen name="auth" />
+      {/* 设置入口在左上角，所以从左侧滑入（与手势方向一致） */}
+      <Stack.Screen name="settings/index" options={{ animation: 'slide_from_left' }} />
+      {/* 账号页同样从设置/左上角进入，保持一致从左侧滑入 */}
+      <Stack.Screen name="auth" options={{ animation: 'slide_from_left' }} />
     </Stack>
   );
 }

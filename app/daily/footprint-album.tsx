@@ -14,5 +14,11 @@ export default function FootprintAlbumRoute() {
 
   if (id === null) return null;
 
-  return <FootprintAlbumScreen footprintId={id} onBack={() => router.back()} />;
+  return (
+    <FootprintAlbumScreen
+      footprintId={id}
+      onBack={() => router.back()}
+      onEdit={() => router.push({ pathname: '/daily/footprint-edit', params: { id } })}
+    />
+  );
 }

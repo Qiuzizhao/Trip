@@ -16,7 +16,6 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Gallery, type GalleryRefType, type SwipeDirection } from 'react-native-zoom-toolkit';
 
 import { radius, spacing } from '@/src/shared/theme';
-import Animated, { useAnimatedStyle, useSharedValue } from 'react-native-reanimated';
 import type { PreviewImage } from './assetResolver';
 import { shareFootprintImage } from './download';
 import { formatTakenAt, readTakenAtFromFile } from './imageMetadata';
@@ -25,6 +24,17 @@ import { createVerticalPullHandler } from './previewGestures';
 
 /** 预览里停留多久就把全分辨率那层挂上（毫秒） */
 const PREVIEW_HI_RES_DELAY_MS = 1000;
+/**
+ * 下拉多少距离背景就完全淡掉（露出下面的页面）。
+ * 系统「照片」就是这样：往下拖时黑色背板先化掉，只剩照片跟着手指走。
+ */
+const PULL_BACKDROP_FADE_DISTANCE = 240;
+/** 顶部计数/关闭按钮/下载按钮比背景淡得更快（和系统「照片」的控件一起退场） */
+const PULL_CHROME_FADE_DISTANCE = 140;
+/** 翻页交叉淡入淡出：先淡出（毫秒） */
+const SWAP_FADE_OUT_MS = 90;
+/** 翻页交叉淡入淡出：再淡入（毫秒） */
+const SWAP_FADE_IN_MS = 140;
 /**
  * 最多同时保留几张全分辨率位图。
  * 每张 24MP / 10 位约 93MB，所以只留最近看过的几张（前后翻动时不必重新解），
@@ -145,17 +155,17 @@ export function FootprintImagePreviewModal({
   // 卡顿结束后积压的滑动一次性生效（表现为"卡住、然后一下跳好几张"）。
   const [interacting, setInteracting] = useState(false);
   const galleryRef = useRef<GalleryRefType>(null);
+  // 当前真实下标（回调/定时器里用 ref 读最新值，避免闭包拿到旧 state）
+  const indexRef = useRef(index);
+  indexRef.current = index;
+  const onIndexChangeRef = useRef(onIndexChange);
+  onIndexChangeRef.current = onIndexChange;
+  // 正在下拉：去掉黑色背板（只留照片跟着手指往下走）
+  const [pulling, setPulling] = useState(false);
+  // 打开预览的时刻：用来过滤"打开那一下的抬手被 Gallery 当成单击"（会立刻把预览关掉）
+  const openedAtRef = useRef(0);
   // 横屏查看：只在预览里把屏幕转过来，退出预览恢复竖屏
   const [landscape, setLandscape] = useState(false);
-  // 下拉收起的位移（跟手）：容器据此同步变淡、轻微缩小
-  const pull = useSharedValue(0);
-  const overlayAnimatedStyle = useAnimatedStyle(() => {
-    const progress = Math.min(1, Math.abs(pull.value) / 320);
-    return {
-      opacity: 1 - progress * 0.7,
-      transform: [{ scale: 1 - progress * 0.06 }],
-    };
-  });
   // 调用方没带拍摄时间时，自己从本地文件读一次（只在真正看到这张图时才读）
   const [measuredTakenAt, setMeasuredTakenAt] = useState<Record<string, number | null>>({});
 
@@ -181,7 +191,10 @@ export function FootprintImagePreviewModal({
   const [openedSession, setOpenedSession] = useState(visible);
   if (visible !== openedSession) {
     setOpenedSession(visible);
-    if (visible) setIndex(initialIndex);
+    if (visible) {
+      setIndex(initialIndex);
+      openedAtRef.current = Date.now();
+    }
   }
 
   useEffect(() => {
@@ -220,6 +233,7 @@ export function FootprintImagePreviewModal({
   const handleIndexChange = useCallback((visualIndex: number) => {
     const realIndex = toRealIndex(visualIndex);
     setIndex(realIndex);
+    indexRef.current = realIndex;
     onIndexChange?.(realIndex);
     // 任何一次翻页都意味着手势结束了（库在"滑动"这条路径不回调 onPanEnd，
     // 不在这里清掉的话 interacting 会一直挂起，停留升级就再也不触发）
@@ -231,13 +245,25 @@ export function FootprintImagePreviewModal({
     }
   }, [count, onIndexChange, toRealIndex, toVisualIndex]);
 
+  // 下拉关闭：极简——松手到阈值就直接关，不做任何收尾动画
+  const requestClose = useCallback(() => {
+    onClose();
+  }, [onClose]);
+
+
   // 下拉超过阈值并松手时关闭（和系统「照片」一致的手感）。
   // Gallery 会在 UI 线程的 worklet 里直接调用它，所以必须由 createVerticalPullHandler 生成 worklet，
   // 不能直接传普通函数（那会闪退，见 previewGestures.ts）。
   const handleVerticalPull = useMemo(
-    () => createVerticalPullHandler(onClose, pull),
-    [onClose, pull],
+    () => createVerticalPullHandler(requestClose, setPulling),
+    [requestClose],
   );
+
+  /** 单击关闭；刚打开的那一下抬手不算（否则打开瞬间又被关掉） */
+  const handleTapClose = useCallback(() => {
+    if (Date.now() - openedAtRef.current < 400) return;
+    onClose();
+  }, [onClose]);
 
   const handleRetry = useCallback(() => {
     if (!currentUri) return;
@@ -299,7 +325,22 @@ export function FootprintImagePreviewModal({
    * 手势结束信号：库里"滑动"这条路径不会回调 onPanEnd，
    * 所以 onSwipe 这里必须把 interacting 清掉（否则停留升级会一直挂起）。
    */
-  const handleSwipe = useCallback((_direction: SwipeDirection) => setInteracting(false), []);
+  /**
+   * 翻页：极简——照片拖动时由 Gallery 跟手，松手直接切到目标页（不做任何动画）。
+   * 库自己的翻页动画已经用补丁关掉（它会被布局重算打断，出现回弹/闪烁），
+   * 这里用 setIndex 一次到位，永远和计数、下载按钮指向的图一致。
+   */
+  const handleSwipe = useCallback((direction: SwipeDirection) => {
+    setInteracting(false);
+    if (count < 2 || (direction !== 'left' && direction !== 'right')) return;
+
+    const target = ((indexRef.current + (direction === 'left' ? 1 : -1)) % count + count) % count;
+    indexRef.current = target;
+    setIndex(target);
+    onIndexChangeRef.current?.(target);
+    galleryRef.current?.setIndex(toVisualIndex(target));
+  }, [count, toVisualIndex]);
+
 
   /**
    * 停留即升级：即使没捏合，某张图看超过 1 秒也把全分辨率那层挂上，
@@ -348,7 +389,8 @@ export function FootprintImagePreviewModal({
 
   return (
     <Modal
-      animationType="fade"
+      // 关闭自带转场：下拉离场由我们自己的动画完成，原生淡出会和它叠在一起闪一下
+      animationType="none"
       onRequestClose={onClose}
       // RN 的 Modal 默认只声明竖屏，会把 App 的横屏锁定挡掉（UIKit 报
       // "Supported orientations has no common orientation"），预览要支持横屏必须在这里放开。
@@ -359,8 +401,11 @@ export function FootprintImagePreviewModal({
     >
       {/* Modal 渲染在独立的原生根视图里，手势必须自己包一层 GestureHandlerRootView */}
       <GestureHandlerRootView style={styles.root}>
-        {/* 下拉时整体跟手变淡、轻微缩小，松手后由 previewGestures 把动画走完再关闭 */}
-        <Animated.View style={[styles.overlay, overlayAnimatedStyle]}>
+        {/* 背板：平时纯黑；往下拖的时候去掉，只留照片跟手 */}
+        <View pointerEvents="none" style={[styles.backdrop, pulling ? styles.backdropHidden : null]} />
+
+        {/* 照片层：跟手下滑由 Gallery 负责 */}
+        <View style={styles.content}>
           {visible ? (
             <Gallery
               data={galleryData}
@@ -374,7 +419,7 @@ export function FootprintImagePreviewModal({
               onPanEnd={handlePanEnd}
               onPanStart={handlePanStart}
               onSwipe={handleSwipe}
-              onTap={onClose}
+              onTap={handleTapClose}
               onVerticalPull={handleVerticalPull}
               onZoomBegin={handleZoomBegin}
               onZoomEnd={handleZoomEnd}
@@ -409,6 +454,10 @@ export function FootprintImagePreviewModal({
               </Pressable>
             </View>
           ) : null}
+        </View>
+
+        {/* 控件层 */}
+        <View pointerEvents="box-none" style={StyleSheet.absoluteFill}>
 
           {visible && (uris.length > 1 || takenAtLabel) ? (
             <View pointerEvents="none" style={[styles.topCenter, { top: topOffset }]}>
@@ -463,7 +512,7 @@ export function FootprintImagePreviewModal({
               </View>
             </View>
           ) : null}
-        </Animated.View>
+        </View>
       </GestureHandlerRootView>
     </Modal>
   );
@@ -556,9 +605,17 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: '42%',
   },
-  overlay: {
-    // 纯黑不透明背景：和系统「照片」一致，避免底下页面透出来（之前用 96% 半透明会隐约看到列表/FAB）
+  // 背板：整屏纯黑
+  backdrop: {
+    ...StyleSheet.absoluteFillObject,
     backgroundColor: '#000',
+  },
+  // 下拉过程中去掉黑底（直接透明，不做过渡）
+  backdropHidden: {
+    backgroundColor: 'transparent',
+  },
+  // 照片层
+  content: {
     flex: 1,
   },
   retryButton: {

@@ -110,6 +110,57 @@ const componentStyles = {
     minHeight: 54,
     paddingHorizontal: spacing.lg,
   },
+  // 明信片风格：「写在纸上」的输入——无底色、只有一条浅灰底线
+  fieldPaper: {
+    gap: 2,
+  },
+  fieldLabelPaper: {
+    color: '#9AA4AE',
+    fontSize: 11.5,
+    fontWeight: '800' as const,
+    letterSpacing: 1.2,
+  },
+  inputPaper: {
+    borderBottomColor: 'rgba(35,41,47,0.10)',
+    borderBottomWidth: 1,
+    color: '#23292F',
+    fontSize: 17,
+    fontWeight: '700' as const,
+    minHeight: 40,
+    paddingBottom: 8,
+    paddingHorizontal: 0,
+  },
+  inputPaperMultiline: {
+    minHeight: 96,
+    paddingTop: 8,
+    textAlignVertical: 'top' as const,
+  },
+  dateRowPaper: {
+    alignItems: 'center' as const,
+    borderBottomColor: 'rgba(35,41,47,0.10)',
+    borderBottomWidth: 1,
+    flexDirection: 'row' as const,
+    justifyContent: 'space-between' as const,
+    paddingBottom: 8,
+  },
+  dateValuePaper: {
+    color: '#23292F',
+    fontFamily: 'Menlo',
+    fontSize: 15,
+    fontWeight: '700' as const,
+    letterSpacing: 0.5,
+  },
+  weekdayChip: {
+    backgroundColor: '#E9A73C',
+    borderRadius: 999,
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '800' as const,
+    marginLeft: 8,
+    overflow: 'hidden' as const,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
   inputMultiline: {
     minHeight: 120,
     paddingTop: spacing.lg,
@@ -274,13 +325,22 @@ export function SheetTextInput({ value, onChangeText, onBlur, sheet: _sheet, ...
   return <TextInput {...inputProps} />;
 }
 
-export function Field({ label, sheet = true, ...props }: TextInputProps & { label: string; sheet?: boolean }) {
+export function Field({
+  label,
+  sheet = true,
+  variant = 'card',
+  ...props
+}: TextInputProps & { label: string; sheet?: boolean; variant?: 'card' | 'paper' }) {
+  const paper = variant === 'paper';
   return (
-    <View style={componentStyles.field}>
-      <Text style={componentStyles.fieldLabel}>{label}</Text>
+    <View style={paper ? componentStyles.fieldPaper : componentStyles.field}>
+      <Text style={paper ? componentStyles.fieldLabelPaper : componentStyles.fieldLabel}>{label}</Text>
       <SheetTextInput
-        placeholderTextColor={colors.faint}
-        style={[componentStyles.input, props.multiline && componentStyles.inputMultiline]}
+        placeholderTextColor={paper ? '#9AA4AE' : colors.faint}
+        style={[
+          paper ? componentStyles.inputPaper : componentStyles.input,
+          props.multiline && (paper ? componentStyles.inputPaperMultiline : componentStyles.inputMultiline),
+        ]}
         sheet={sheet}
         scrollEnabled={props.multiline ? false : props.scrollEnabled}
         {...props}
@@ -292,6 +352,9 @@ export function Field({ label, sheet = true, ...props }: TextInputProps & { labe
 function pad(value: number) {
   return String(value).padStart(2, '0');
 }
+
+/** 日期网格从周日开始，所以表头也从「日」起 */
+const WEEKDAY_LABELS = ['日', '一', '二', '三', '四', '五', '六'];
 
 function dateString(date: Date) {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
@@ -328,14 +391,21 @@ export function DateField({
   label,
   value,
   onChangeText,
+  showWeekday = false,
+  variant = 'card',
 }: {
   label?: string;
   value?: string;
   onChangeText: (value: string) => void;
+  /** 日期后面跟一枚「周六」这样的星期胶囊 */
+  showWeekday?: boolean;
+  variant?: 'card' | 'paper';
 }) {
+  const paper = variant === 'paper';
   const [open, setOpen] = useState(false);
   const [viewDate, setViewDate] = useState(() => parseDate(value));
   const days = useMemo(() => buildCalendarDays(viewDate), [viewDate]);
+  const weekdayLabel = showWeekday ? `周${WEEKDAY_LABELS[parseDate(value).getDay()]}` : null;
 
   const chooseDate = (date: Date) => {
     onChangeText(dateString(date));
@@ -343,22 +413,32 @@ export function DateField({
   };
 
   return (
-    <View style={componentStyles.field}>
-      {label ? <Text style={componentStyles.fieldLabel}>{label}</Text> : null}
+    <View style={paper ? componentStyles.fieldPaper : componentStyles.field}>
+      {label ? (
+        <Text style={paper ? componentStyles.fieldLabelPaper : componentStyles.fieldLabel}>{label}</Text>
+      ) : null}
       <Pressable
         onPress={() => {
           setViewDate(parseDate(value));
           setOpen(true);
         }}
         style={({ pressed }) => [
-          componentStyles.input,
-          { alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between' },
+          paper
+            ? componentStyles.dateRowPaper
+            : [componentStyles.input, { alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between' }],
           pressed && componentStyles.pressed,
         ]}
       >
-        <Text style={{ color: value ? colors.text : colors.faint, fontSize: 16, fontWeight: '700' }}>
-          {value || '选择日期'}
-        </Text>
+        <View style={{ alignItems: 'center', flexDirection: 'row' }}>
+          <Text
+            style={paper
+              ? componentStyles.dateValuePaper
+              : { color: value ? colors.text : colors.faint, fontSize: 16, fontWeight: '700' }}
+          >
+            {value || '选择日期'}
+          </Text>
+          {weekdayLabel ? <Text style={componentStyles.weekdayChip}>{weekdayLabel}</Text> : null}
+        </View>
         <Ionicons name="calendar-outline" size={20} color={colors.primary} />
       </Pressable>
 
@@ -377,6 +457,14 @@ export function DateField({
                 {viewDate.getFullYear()}年{viewDate.getMonth() + 1}月
               </Text>
               <IconButton name="chevron-forward" label="下个月" onPress={() => setViewDate(new Date(viewDate.getFullYear(), viewDate.getMonth() + 1, 1))} transparent />
+            </View>
+            {/* 星期表头：和下面的日期格子同宽同间距，逐列对齐 */}
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs, marginBottom: spacing.xs }}>
+              {WEEKDAY_LABELS.map((label) => (
+                <View key={label} style={{ alignItems: 'center', justifyContent: 'center', width: '13.1%' }}>
+                  <Text style={{ color: colors.muted, fontSize: 12, fontWeight: '700' }}>{label}</Text>
+                </View>
+              ))}
             </View>
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs }}>
               {days.map(({ date, currentMonth }) => {

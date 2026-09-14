@@ -31,10 +31,18 @@ export function createVerticalPullHandler(
 ) {
   return (event: VerticalPullEvent) => {
     'worklet';
-    scheduleOnRN(onPullingChange, !event.released);
-    if (!event.released) return;
-    if (event.translateY > VERTICAL_PULL_CLOSE_THRESHOLD) {
-      scheduleOnRN(requestClose);
+    if (!event.released) {
+      scheduleOnRN(onPullingChange, true);
+      return;
     }
+    if (event.translateY > VERTICAL_PULL_CLOSE_THRESHOLD) {
+      // 关闭路径：**不要**恢复黑底。背板恢复和 Modal 卸载是两次独立的 JS 提交，
+      // 中间会渲染出一帧整屏纯黑（快速下滑时照片还在屏幕中央，这一帧最刺眼，就是那个闪）。
+      // 反正马上要卸载 Modal，露出的就是背后的列表页。
+      scheduleOnRN(requestClose);
+      return;
+    }
+    // 没到阈值：库会把照片弹回原位，这时再恢复黑底才不会被看成闪烁
+    scheduleOnRN(onPullingChange, false);
   };
 }

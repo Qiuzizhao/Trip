@@ -73,7 +73,7 @@ index 4098a9e..c9b44d3 100644
    if (swipeLeft && inLeftBound) return 'left';
    const swipeUp = e.velocityY <= -1 * SWIPE_VELOCITY && swipedDistanceY && swipedInTime;
 diff --git a/node_modules/react-native-zoom-toolkit/lib/module/components/gallery/Gallery.js b/node_modules/react-native-zoom-toolkit/lib/module/components/gallery/Gallery.js
-index da2f746..2af7505 100644
+index da2f746..d989aff 100644
 --- a/node_modules/react-native-zoom-toolkit/lib/module/components/gallery/Gallery.js
 +++ b/node_modules/react-native-zoom-toolkit/lib/module/components/gallery/Gallery.js
 @@ -81,13 +81,24 @@ const Gallery = props => {
@@ -112,6 +112,21 @@ index da2f746..2af7505 100644
    useAnimatedReaction(() => ({
      vertical,
      size: {
+@@ -191,9 +204,13 @@ const Gallery = props => {
+     style: animatedStyles,
+     onLayout: measureRoot,
+     children: [data.map((item, index) => {
++      // Trip patch: 首尾两组页常驻 —— 无限循环预览靠"滑到克隆页后无声跳回真实页"实现，
++      // 而跳页时目标页往往远在渲染窗口之外（windowSize=3 时窗口只有 ±1 页），
++      // 那一帧目标页还没挂到树上就是一片空白 = 首尾互滑时的闪烁。这里让两端各两页always mounted。
++      const isEndPage = index <= 1 || index >= data.length - 2;
+       const inLowerHalf = index < scrollIndex - nextItems;
+       const inUpperHalf = index > scrollIndex + nextItems;
+-      if (inLowerHalf || inUpperHalf) {
++      if (!isEndPage && (inLowerHalf || inUpperHalf)) {
+         return null;
+       }
+       const key = keyExtractor?.(item, index) ?? `item-${index}`;
 diff --git a/node_modules/react-native-zoom-toolkit/lib/module/components/gallery/GalleryGestureHandler.js b/node_modules/react-native-zoom-toolkit/lib/module/components/gallery/GalleryGestureHandler.js
 index 3bbf4a4..e12f36a 100644
 --- a/node_modules/react-native-zoom-toolkit/lib/module/components/gallery/GalleryGestureHandler.js
@@ -423,7 +438,7 @@ index 232a61f..c0cb11d 100644
    const inLeftBound = translate.x === -1 * boundX;
    if (swipeLeft && inLeftBound) return 'left';
 diff --git a/node_modules/react-native-zoom-toolkit/src/components/gallery/Gallery.tsx b/node_modules/react-native-zoom-toolkit/src/components/gallery/Gallery.tsx
-index 2f85f6e..32b80dd 100644
+index 2f85f6e..4e7e185 100644
 --- a/node_modules/react-native-zoom-toolkit/src/components/gallery/Gallery.tsx
 +++ b/node_modules/react-native-zoom-toolkit/src/components/gallery/Gallery.tsx
 @@ -101,14 +101,29 @@ const Gallery = <T,>(props: GalleryPropsWithRef<T>) => {
@@ -457,6 +472,22 @@ index 2f85f6e..32b80dd 100644
 -    rootSize.height.set(height);
      scroll.set(scrollPosition);
    };
+ 
+@@ -239,10 +254,14 @@ const Gallery = <T,>(props: GalleryPropsWithRef<T>) => {
+       onLayout={measureRoot}
+     >
+       {data.map((item, index) => {
++        // Trip patch: 首尾两组页常驻 —— 无限循环预览靠"滑到克隆页后无声跳回真实页"实现，
++        // 跳页时目标页常常落在渲染窗口之外（windowSize=3 时窗口只有 ±1 页），
++        // 那一帧目标页还没挂到树上就是空白 = 首尾互滑时的闪烁。两端各两页始终挂载。
++        const isEndPage = index <= 1 || index >= data.length - 2;
+         const inLowerHalf = index < scrollIndex - nextItems;
+         const inUpperHalf = index > scrollIndex + nextItems;
+ 
+-        if (inLowerHalf || inUpperHalf) {
++        if (!isEndPage && (inLowerHalf || inUpperHalf)) {
+           return null;
+         }
  
 diff --git a/node_modules/react-native-zoom-toolkit/src/components/gallery/GalleryGestureHandler.tsx b/node_modules/react-native-zoom-toolkit/src/components/gallery/GalleryGestureHandler.tsx
 index cd4b7bd..4bb1af3 100644

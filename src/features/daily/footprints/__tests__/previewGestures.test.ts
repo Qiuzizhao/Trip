@@ -38,4 +38,16 @@ describe('createVerticalPullHandler（极简版）', () => {
     handler({ released: false, translateY: VERTICAL_PULL_CLOSE_THRESHOLD + 200 });
     expect(requestClose).not.toHaveBeenCalled();
   });
+
+  it('关闭路径不恢复黑底（否则 Modal 卸载前会闪一帧纯黑）', () => {
+    const requestClose = jest.fn();
+    const onPullingChange = jest.fn();
+    const handler = createVerticalPullHandler(requestClose, onPullingChange);
+    handler({ released: false, translateY: 120 });
+    onPullingChange.mockClear();
+    handler({ released: true, translateY: VERTICAL_PULL_CLOSE_THRESHOLD + 40 });
+    expect(requestClose).toHaveBeenCalledTimes(1);
+    // 松手关闭这条路径上不允许再动背板
+    expect(onPullingChange).not.toHaveBeenCalled();
+  });
 });

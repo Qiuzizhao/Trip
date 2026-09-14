@@ -8,6 +8,7 @@ create table if not exists public.trip_footprints (
   coordinate text,
   visit_date text not null default '',
   notes text,
+  tags text[] not null default '{}',   -- 标签，见 trip-footprints-tags.sql
   rating numeric,
   created_at timestamptz not null,
   updated_at timestamptz not null,

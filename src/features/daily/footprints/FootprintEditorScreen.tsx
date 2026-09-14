@@ -14,6 +14,8 @@ import { styles } from '../_shared/styles';
 import { Item, ScreenShell, confirmRemove, today } from '../_shared/ReplicatedScreens';
 import { FootprintImagePreviewModal } from './FootprintImagePreviewModal';
 import { persistFootprintImageUri } from './footprintImageFiles';
+import { collectTagCounts, formatTagsInput, normalizeTags, parseTagInput } from './footprintTags';
+import { tagColorFor } from './tagColors';
 import { readTakenAtFromFile, takenAtOptions } from './imageMetadata';
 
 const footprintEditorImageSourceCache = new Map<string, ImageSource>();
@@ -22,6 +24,8 @@ type FootprintForm = {
   location: string;
   coordinate: string;
   visit_date: string;
+  /** 标签的原始输入文本，保存时再解析成数组 */
+  tags: string;
   notes: string;
   image_urls: string[];
 };
@@ -65,7 +69,7 @@ function footprintImageUris(item: Item) {
 }
 
 function createFootprintForm(): FootprintForm {
-  return { location: '', coordinate: '', visit_date: today(), notes: '', image_urls: [] };
+  return { location: '', coordinate: '', visit_date: today(), tags: '', notes: '', image_urls: [] };
 }
 
 function formFromItem(item: Item): FootprintForm {
@@ -73,6 +77,7 @@ function formFromItem(item: Item): FootprintForm {
     location: item.location || '',
     coordinate: item.coordinate || '',
     visit_date: item.visit_date || today(),
+    tags: formatTagsInput(normalizeTags(item.tags)),
     notes: item.notes || '',
     image_urls: footprintImageUris(item),
   };
@@ -98,6 +103,7 @@ export function FootprintEditorScreen({
   const [previewIndex, setPreviewIndex] = useState<number | null>(null);
   // uri -> 拍摄时间（毫秒）；读不到记 null，避免重复读同一个文件
   const [takenAtByUri, setTakenAtByUri] = useState<Record<string, number | null>>({});
+  const [knownTags, setKnownTags] = useState<string[]>([]);
   const title = isEditing ? '编辑足迹' : '记录新足迹';
   const canSave = useMemo(() => Boolean(form.location.trim()) && !saving, [form.location, saving]);
   const previewItems = useMemo(() => form.image_urls.map((uri) => ({ uri })), [form.image_urls]);
@@ -105,6 +111,18 @@ export function FootprintEditorScreen({
     () => takenAtOptions(form.image_urls.map((uri) => takenAtByUri[uri])),
     [form.image_urls, takenAtByUri],
   );
+  const formTags = useMemo(() => parseTagInput(form.tags), [form.tags]);
+  // 常用标签：从已有记录里统计，点一下就能补进输入框
+  const tagSuggestions = useMemo(
+    () => knownTags.filter((tag) => !formTags.some((value) => value.toLowerCase() === tag.toLowerCase())),
+    [knownTags, formTags],
+  );
+
+  useEffect(() => {
+    void listFootprintsLocal()
+      .then((items) => setKnownTags(collectTagCounts(items).map((entry) => entry.tag)))
+      .catch(() => undefined);
+  }, []);
 
   // 加了照片就顺手读一次 EXIF，把可以一键填入的拍摄时间找出来
   useEffect(() => {
@@ -192,6 +210,7 @@ export function FootprintEditorScreen({
         location: form.location.trim(),
         coordinate: form.coordinate.trim() || null,
         visit_date: form.visit_date,
+        tags: formTags,
         notes: form.notes.trim() || null,
         rating: 5,
       };
@@ -273,6 +292,34 @@ export function FootprintEditorScreen({
                       </Pressable>
                     );
                   })}
+                </View>
+              </View>
+            ) : null}
+            <Field
+              sheet={false}
+              label="标签"
+              value={form.tags}
+              placeholder="用逗号分隔，例如：海边, 周末"
+              onChangeText={(value) => setForm((current) => ({ ...current, tags: value }))}
+            />
+            {tagSuggestions.length ? (
+              <View style={{ marginTop: -spacing.md }}>
+                <Text style={styles.formLabel}>常用标签</Text>
+                <View style={styles.pills}>
+                  {tagSuggestions.map((tag) => (
+                    <Pressable
+                      key={tag}
+                      accessibilityLabel={`添加标签 ${tag}`}
+                      accessibilityRole="button"
+                      onPress={() => setForm((current) => ({
+                        ...current,
+                        tags: formatTagsInput(parseTagInput([current.tags, tag].filter(Boolean).join(','))),
+                      }))}
+                      style={[styles.pill, { backgroundColor: tagColorFor(tag).backgroundColor, borderColor: tagColorFor(tag).color }]}
+                    >
+                      <Text style={[styles.pillText, { color: tagColorFor(tag).color }]}>{tag}</Text>
+                    </Pressable>
+                  ))}
                 </View>
               </View>
             ) : null}

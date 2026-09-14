@@ -12,10 +12,15 @@ import { getPreloadedData, homePreloadKeys, setPreloadedData } from '@/src/local
 import { listFootprintIdsWithPendingAssets, subscribeAssetsLocal } from '@/src/local/repositories/assetRepository';
 import { listFootprintsLocal, subscribeFootprintsLocal } from '@/src/local/repositories/footprintsRepository';
 import { styles } from '../_shared/styles';
-import { Item, ScreenShell, SectionCard } from '../_shared/ReplicatedScreens';
+import { Item, ScreenShell, SectionCard, Tag } from '../_shared/ReplicatedScreens';
 import { FootprintImagePreviewModal } from './FootprintImagePreviewModal';
 import { resolveFootprintImageUris, type PreviewImage } from './assetResolver';
+import { collectTagCounts, itemHasTag, normalizeTags } from './footprintTags';
+import { tagColorFor } from './tagColors';
 import { footprintDisplayImageUri, footprintImageUris, imageSourceFor, prefetchFootprintImages, thumbnailUrlFor } from './imageCache';
+
+/** 卡片上最多直接显示的标签数，多出来的折成 +N */
+const MAX_VISIBLE_TAGS = 3;
 
 function CachedFootprintImage({
   uri,
@@ -56,6 +61,7 @@ export function FootprintScreen({
   const [items, setItems] = useState<Item[]>(() => getPreloadedData<Item[]>(homePreloadKeys.footprints) ?? []);
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [activeTag, setActiveTag] = useState<string | null>(null);
   const [preview, setPreview] = useState<{ items: PreviewImage[]; index: number } | null>(null);
   const [pendingAssetIds, setPendingAssetIds] = useState<Set<string>>(() => new Set());
   const [resolvedAssetUris, setResolvedAssetUris] = useState<Record<string, string[]>>({});
@@ -68,14 +74,23 @@ export function FootprintScreen({
 
   const filteredItems = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
-    if (!query) return items;
     return items.filter((item) => {
+      if (!itemHasTag(item, activeTag)) return false;
+      if (!query) return true;
       const locationMatch = String(item.location || '').toLowerCase().includes(query);
       const notesMatch = String(item.notes || '').toLowerCase().includes(query);
       const cityMatch = String(item.coordinate || '').toLowerCase().includes(query);
-      return locationMatch || notesMatch || cityMatch;
+      const tagMatch = normalizeTags(item.tags).some((tag) => tag.toLowerCase().includes(query));
+      return locationMatch || notesMatch || cityMatch || tagMatch;
     });
-  }, [items, searchQuery]);
+  }, [items, searchQuery, activeTag]);
+
+  const tagCounts = useMemo(() => collectTagCounts(items), [items]);
+
+  // 标签在筛选状态下被删掉时，避免留下一个空列表
+  useEffect(() => {
+    if (activeTag && !tagCounts.some((entry) => entry.tag === activeTag)) setActiveTag(null);
+  }, [activeTag, tagCounts]);
 
   // 解析每条记录的展示用图片 URI（asset 优先：本地文件在就用本地，否则用远端对象）。
   // 记录或资产变化时都要刷新，否则同步后新加的记录不会显示图片。
@@ -175,6 +190,37 @@ export function FootprintScreen({
               )}
             </View>
 
+            {tagCounts.length ? (
+              <View style={[styles.pills, { marginTop: spacing.xs }]}>
+                <Pressable
+                  accessibilityLabel="显示全部足迹"
+                  accessibilityRole="button"
+                  onPress={() => setActiveTag(null)}
+                  style={[styles.pill, !activeTag && styles.pillSelected]}
+                >
+                  <Text style={[styles.pillText, !activeTag && styles.pillTextSelected]}>
+                    全部 {items.length}
+                  </Text>
+                </Pressable>
+                {tagCounts.map(({ tag, count }) => {
+                  const selected = activeTag === tag;
+                  return (
+                    <Pressable
+                      key={tag}
+                      accessibilityLabel={`按标签 ${tag} 筛选`}
+                      accessibilityRole="button"
+                      onPress={() => setActiveTag(selected ? null : tag)}
+                      style={[styles.pill, selected && styles.pillSelected]}
+                    >
+                      <Text style={[styles.pillText, selected && styles.pillTextSelected]}>
+                        {tag} {count}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            ) : null}
+
             <StateView loading={false} error={error} onRetry={load} />
           </>
         )}
@@ -182,6 +228,8 @@ export function FootprintScreen({
         renderItem={({ item }) => {
           const images = resolvedAssetUris[String(item.id)] ?? footprintImageUris(item);
           const hasPendingAssets = pendingAssetIds.has(String(item.id));
+          const tags = normalizeTags(item.tags);
+          const visibleTags = tags.slice(0, MAX_VISIBLE_TAGS);
           return (
             <Pressable
               onPress={() => onPressCard(item)}
@@ -189,32 +237,38 @@ export function FootprintScreen({
               delayLongPress={350}
             >
               <SectionCard style={styles.recordCard}>
-                <View style={styles.rowTop}>
-                  <View style={[styles.recordIcon, { backgroundColor: colors.warningSoft }]}>
-                    <Ionicons name="location-outline" size={22} color={colors.warning} />
+                <View style={styles.recordCardHeader}>
+                  <View style={[styles.recordCardIcon, { backgroundColor: colors.warningSoft }]}>
+                    <Ionicons name="location-outline" size={18} color={colors.warning} />
                   </View>
-                  <View style={styles.flex}>
-                    <View style={{ gap: 2 }}>
-                      <Text style={styles.itemTitle}>{item.location}</Text>
-                      {item.coordinate ? (
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 1 }}>
-                          <Ionicons name="location" size={12} color={colors.primary} />
-                          <Text style={{ fontSize: 13, color: colors.textSoft, fontWeight: '600' }}>
-                            {item.coordinate}
-                          </Text>
-                        </View>
-                      ) : null}
+                  <View style={styles.recordCardTitleRow}>
+                    <Text numberOfLines={1} style={styles.recordCardTitle}>{item.location}</Text>
+                    {item.coordinate ? (
+                      <>
+                        <Text style={styles.recordCardDot}>·</Text>
+                        <Text numberOfLines={1} style={styles.recordCardCoordinate}>{item.coordinate}</Text>
+                      </>
+                    ) : null}
+                  </View>
+                </View>
+
+                <View style={styles.recordCardMeta}>
+                  <Text style={styles.metaText}>{item.visit_date}</Text>
+                  {visibleTags.map((tag) => (
+                    <Tag key={tag} compact label={tag} {...tagColorFor(tag)} />
+                  ))}
+                  {tags.length > visibleTags.length ? (
+                    <Tag compact label={`+${tags.length - visibleTags.length}`} tone="gray" />
+                  ) : null}
+                  {hasPendingAssets ? (
+                    <View style={styles.pendingBadge}>
+                      <Ionicons name="cloud-upload-outline" size={11} color={colors.warning} />
+                      <Text style={styles.pendingBadgeText}>图片待同步</Text>
                     </View>
-                    <View style={{ alignItems: 'center', flexDirection: 'row', gap: spacing.sm, marginBottom: spacing.xs, marginTop: 4 }}>
-                      <Text style={styles.metaText}>{item.visit_date}</Text>
-                      {hasPendingAssets ? (
-                        <View style={styles.pendingBadge}>
-                          <Ionicons name="cloud-upload-outline" size={11} color={colors.warning} />
-                          <Text style={styles.pendingBadgeText}>图片待同步</Text>
-                        </View>
-                      ) : null}
-                    </View>
-                    {images.length > 0 ? (
+                  ) : null}
+                </View>
+
+                {images.length > 0 ? (
                       <View style={styles.footprintImageGrid}>
                         {images.slice(0, 3).map((uri, idx) => {
                           const displayUri = footprintDisplayImageUri(uri);
@@ -259,10 +313,8 @@ export function FootprintScreen({
                           );
                         })}
                       </View>
-                    ) : null}
-                    {item.notes ? <Text style={[styles.bodyText, { marginTop: 4 }]}>{item.notes}</Text> : null}
-                  </View>
-                </View>
+                ) : null}
+                {item.notes ? <Text style={[styles.bodyText, { marginTop: 4 }]}>{item.notes}</Text> : null}
               </SectionCard>
             </Pressable>
           );

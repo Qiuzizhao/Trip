@@ -8,6 +8,7 @@ import { isLocalOnlyMode } from '@/src/local/repositories/appSettingsRepository'
 import { migrateFootprintImagesToAssets } from '@/src/local/repositories/assetMigration';
 import { listFootprintsForSync, replaceFootprintsFromSync, type FootprintItem } from '@/src/local/repositories/footprintsRepository';
 import { getSyncMetadata, saveSyncMetadata } from '@/src/local/syncMetadataRepository';
+import { normalizeTags } from '@/src/features/daily/footprints/footprintTags';
 import { repairEmptyAssetObjects } from './assetRepair';
 import { runAssetSync } from './assetQueue';
 import { mergeSyncRecords } from './syncMerge';
@@ -38,6 +39,7 @@ function toRemoteFootprint(footprint: FootprintItem, userId: string) {
     coordinate: footprint.coordinate ? String(footprint.coordinate) : null,
     visit_date: String(footprint.visit_date || ''),
     notes: footprint.notes ? String(footprint.notes) : null,
+    tags: normalizeTags(footprint.tags),
     rating: typeof footprint.rating === 'number' ? footprint.rating : null,
     created_at: footprint.created_at,
     updated_at: footprint.updated_at,
@@ -52,6 +54,7 @@ function toLocalFootprint(footprint: Record<string, unknown>): FootprintItem {
     coordinate: (footprint.coordinate as string | null) ?? null,
     visit_date: String(footprint.visit_date ?? ''),
     notes: (footprint.notes as string | null) ?? null,
+    tags: normalizeTags(footprint.tags),
     rating: (footprint.rating as number | null) ?? null,
     created_at: String(footprint.created_at),
     updated_at: String(footprint.updated_at),
@@ -130,7 +133,7 @@ export async function runManualSync(): Promise<ManualSyncResult> {
   // 4) 拉取远端记录并合并
   const { data: remoteFootprintsData, error: remoteFootprintsError } = await supabase
     .from('trip_footprints')
-    .select('id,user_id,location,coordinate,visit_date,notes,rating,created_at,updated_at,deleted_at')
+    .select('id,user_id,location,coordinate,visit_date,notes,tags,rating,created_at,updated_at,deleted_at')
     .eq('user_id', userId);
   if (remoteFootprintsError) throw remoteFootprintsError;
 

@@ -1,10 +1,13 @@
 import type { Item } from '@/src/features/daily/_shared/ReplicatedScreens';
 import { repairFootprintImageReferences } from '@/src/features/daily/footprints/footprintImageFiles';
+import { normalizeTags } from '@/src/features/daily/footprints/footprintTags';
 import { localKeys } from '../keys';
 import { getCachedList, setCachedList } from './localListCache';
 
 export type SyncStatus = 'pending' | 'synced' | 'failed';
 export type FootprintItem = Item & {
+  /** 标签（服务端是 text[]，本地直接存数组） */
+  tags: string[];
   created_at: string;
   updated_at: string;
   deleted_at?: string | null;
@@ -47,6 +50,7 @@ export async function createFootprintCached(payload: Record<string, unknown>) {
     updated_at: now,
     deleted_at: null,
     sync_status: 'pending',
+    tags: [],
     ...payload,
   };
   await persistFootprints([item, ...items]);
@@ -107,7 +111,8 @@ async function loadNormalizedFootprints() {
     item.deleted_at !== repaired[index]?.deleted_at ||
     item.sync_status !== repaired[index]?.sync_status ||
     item.image_url !== repaired[index]?.image_url ||
-    JSON.stringify(item.image_urls ?? null) !== JSON.stringify(repaired[index]?.image_urls ?? null)
+    JSON.stringify(item.image_urls ?? null) !== JSON.stringify(repaired[index]?.image_urls ?? null) ||
+    JSON.stringify(normalizeTags(item.tags)) !== JSON.stringify(repaired[index]?.tags ?? [])
   ));
   if (needsRewrite) {
     await setCachedList(localKeys.footprints, sortFootprints(repaired));
@@ -124,6 +129,7 @@ function normalizeFootprint(value: Record<string, unknown>, fallbackStatus: Sync
   return {
     ...value,
     id,
+    tags: normalizeTags(value.tags),
     created_at: typeof value.created_at === 'string' ? value.created_at : now,
     updated_at: typeof value.updated_at === 'string' ? value.updated_at : now,
     deleted_at: typeof value.deleted_at === 'string' ? value.deleted_at : null,

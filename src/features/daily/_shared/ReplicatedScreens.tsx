@@ -52,21 +52,32 @@ export function Tag({
   label,
   icon,
   tone = 'gray',
+  compact = false,
   color,
   backgroundColor,
 }: {
   label: string;
   icon?: keyof typeof Ionicons.glyphMap;
   tone?: 'gray' | 'blue' | 'green' | 'red' | 'purple' | 'orange';
+  /** 紧凑模式：列表卡片这种一行要塞下多个标签时用 */
+  compact?: boolean;
   color?: string;
   backgroundColor?: string;
 }) {
   const toneStyle = styles[`tag_${tone}`];
   const textColor = color || toneStyle.color;
   return (
-    <View style={[styles.tag, toneStyle, backgroundColor ? { backgroundColor } : null, { flexDirection: 'row', alignItems: 'center', gap: 4 }]}>
+    <View
+      style={[
+        styles.tag,
+        compact && styles.tagCompact,
+        toneStyle,
+        backgroundColor ? { backgroundColor } : null,
+        { flexDirection: 'row', alignItems: 'center', gap: 4 },
+      ]}
+    >
       {icon ? <Ionicons name={icon} size={12} color={textColor} /> : null}
-      <Text style={{ color: textColor, fontSize: 13, fontWeight: '700' }}>{label}</Text>
+      <Text style={{ color: textColor, fontSize: compact ? 11 : 13, fontWeight: '700' }}>{label}</Text>
     </View>
   );
 }

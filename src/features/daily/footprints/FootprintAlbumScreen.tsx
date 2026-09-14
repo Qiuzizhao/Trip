@@ -3,7 +3,7 @@ import { Image as ExpoImage, type ImageSource, type ImageStyle } from 'expo-imag
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Alert, FlatList, Pressable, StyleSheet, Text, View, type StyleProp } from 'react-native';
 
-import { ScreenShell, Item } from '../_shared/ReplicatedScreens';
+import { ScreenShell, Item, Tag } from '../_shared/ReplicatedScreens';
 import { colors, radius, spacing, shadow } from '@/src/shared/theme';
 import { buildAssetUrl } from '@/src/shared/api';
 import { listFootprintsLocal } from '@/src/local/repositories/footprintsRepository';
@@ -11,6 +11,8 @@ import { StateView } from '@/src/shared/components';
 import { shareFootprintImage } from './download';
 import { FootprintImagePreviewModal } from './FootprintImagePreviewModal';
 import { resolveFootprintImages, type PreviewImage } from './assetResolver';
+import { normalizeTags } from './footprintTags';
+import { tagColorFor } from './tagColors';
 
 const footprintAlbumImageSourceCache = new Map<string, ImageSource>();
 
@@ -132,6 +134,14 @@ export function FootprintAlbumScreen({
 
             <Text style={albumStyles.dateText}>到达日期：{item.visit_date}</Text>
 
+            {normalizeTags(item.tags).length ? (
+              <View style={albumStyles.tagRow}>
+                {normalizeTags(item.tags).map((tag) => (
+                  <Tag key={tag} label={tag} {...tagColorFor(tag)} />
+                ))}
+              </View>
+            ) : null}
+
             {item.notes ? (
               <Text style={albumStyles.notesText}>{item.notes}</Text>
             ) : null}
@@ -246,6 +256,12 @@ const albumStyles = StyleSheet.create({
     color: colors.muted,
     fontWeight: '500',
     marginTop: 4,
+  },
+  tagRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginTop: spacing.sm,
   },
   notesText: {
     fontSize: 15,

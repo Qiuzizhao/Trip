@@ -13,6 +13,10 @@ import { imageSourceFor } from './imageCache';
  * 2. 直接用**原图地址**，不再让服务端 imgproxy 生成缩略图：imgproxy 解不了
  *    10 位 HDR HEIC（会返回 422 Invalid source image），而缩小本来就由 expo-image
  *    在本地完成（本地模式下一直就是这么显示的）。取舍理由见 docs/footprint-thumbnails.md。
+ * 3. 打开 `enforceEarlyResizing`：把控件尺寸告诉解码器，让它**直接解出小图**，
+ *    而不是先解出整张 24MP 位图再缩放。实测同一张 5712×4284 的 HDR HEIC：
+ *    全尺寸解码 + 缩放约 1073ms / 93MB，直接解缩略图约 126ms / 0.5MB，
+ *    两者都保留 HDR（contentHeadroom 2.30）。
  */
 export function FootprintThumbnail({
   uri,
@@ -28,6 +32,7 @@ export function FootprintThumbnail({
     <ExpoImage
       cachePolicy="memory-disk"
       contentFit={contentFit}
+      enforceEarlyResizing
       priority="high"
       source={imageSourceFor(uri)}
       style={style}

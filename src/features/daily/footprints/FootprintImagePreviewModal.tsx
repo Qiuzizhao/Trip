@@ -46,6 +46,8 @@ export function FootprintImagePreviewModal({
   // 失败的图片（uri -> 重试次数），用于展示「图片不可用」并支持重试
   const [failedUris, setFailedUris] = useState<Record<string, number>>({});
   const [reloadToken, setReloadToken] = useState(0);
+  // 已经触发过「放大看细节」的图（uri）：这些图会多叠一层全分辨率位图
+  const [hiResUris, setHiResUris] = useState<Set<string>>(() => new Set());
   // 调用方没带拍摄时间时，自己从本地文件读一次（只在真正看到这张图时才读）
   const [measuredTakenAt, setMeasuredTakenAt] = useState<Record<string, number | null>>({});
 
@@ -108,6 +110,18 @@ export function FootprintImagePreviewModal({
     setReloadToken((token) => token + 1);
   }, [currentUri]);
 
+  /**
+   * 分级加载（苹果相册的做法）：先用「屏幕尺寸」的位图秒出图，
+   * 用户开始捏合/双击放大时，再解一张全分辨率的替换上去。
+   *
+   * Gallery 的 onZoomBegin 走 JS 线程（库内部用 scheduleOnRN），可以直接 setState。
+   */
+  const handleZoomBegin = useCallback((zoomIndex: number) => {
+    const uri = uris[zoomIndex];
+    if (!uri) return;
+    setHiResUris((previous) => (previous.has(uri) ? previous : new Set(previous).add(uri)));
+  }, [uris]);
+
   const topOffset = useMemo(() => insets.top + 8, [insets.top]);
   const bottomOffset = useMemo(() => Math.max(insets.bottom, spacing.lg) + spacing.md, [insets.bottom]);
 
@@ -131,23 +145,41 @@ export function FootprintImagePreviewModal({
               onIndexChange={handleIndexChange}
               onTap={onClose}
               onVerticalPull={handleVerticalPull}
+              onZoomBegin={handleZoomBegin}
               renderItem={(uri) => (
-                <ExpoImage
-                  cachePolicy="memory-disk"
-                  contentFit={contentFit}
-                  // HDR：走 ImageIO 缩略图解码（保留 gain map 的扩展动态范围），
-                  // 避免 expo-image 用 UIGraphicsImageRenderer 重绘时把高光压回 SDR。
-                  enforceEarlyResizing
-                  key={`${uri}-${reloadToken}`}
-                  onError={() => {
-                    setFailedUris((previous) => ({ ...previous, [uri]: (previous[uri] ?? 0) + 1 }));
-                  }}
-                  placeholderContentFit={contentFit}
-                  priority="high"
-                  source={{ uri }}
-                  style={[{ height: windowHeight, width: windowWidth }, imageStyle]}
-                  transition={0}
-                />
+                <View style={{ height: windowHeight, width: windowWidth }}>
+                  <ExpoImage
+                    cachePolicy="memory-disk"
+                    contentFit={contentFit}
+                    // 第一层：按屏幕尺寸解码（enforceEarlyResizing 让 ImageIO 直接出小图），
+                    // 打开即有图、内存也小；HDR 同样保留（这条路径实测 headroom 仍是 2.30）。
+                    enforceEarlyResizing
+                    key={`${uri}-${reloadToken}-screen`}
+                    onError={() => {
+                      setFailedUris((previous) => ({ ...previous, [uri]: (previous[uri] ?? 0) + 1 }));
+                    }}
+                    priority="high"
+                    source={{ uri }}
+                    style={[{ height: windowHeight, width: windowWidth }, imageStyle]}
+                    transition={0}
+                  />
+                  {hiResUris.has(uri) ? (
+                    <ExpoImage
+                      // 放大后叠上全分辨率那层：
+                      // - allowDownscaling=false：不要缩到屏幕尺寸，保留原分辨率，放大才清晰；
+                      // - 独立 cacheKey：SDWebImage 的内存缓存按 key 命中，
+                      //   沿用同一个 key 会直接返回上一层那张小图，等于白解。
+                      allowDownscaling={false}
+                      cachePolicy="memory-disk"
+                      contentFit={contentFit}
+                      key={`${uri}-${reloadToken}-full`}
+                      priority="high"
+                      source={{ cacheKey: `${uri}#full`, uri }}
+                      style={[StyleSheet.absoluteFill, imageStyle]}
+                      transition={120}
+                    />
+                  ) : null}
+                </View>
               )}
               tapOnEdgeToItem={false}
               windowSize={3}

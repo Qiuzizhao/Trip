@@ -8,19 +8,108 @@
 // 4. 预先取相邻图片，滑动切换时不再等网络。
 import { Ionicons } from '@expo/vector-icons';
 import { Image as ExpoImage, type ImageStyle } from 'expo-image';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Modal, Pressable, StyleSheet, Text, useWindowDimensions, View, type StyleProp } from 'react-native';
+import * as ScreenOrientation from 'expo-screen-orientation';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Alert, Modal, Pressable, StyleSheet, Text, useWindowDimensions, View, type StyleProp } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Gallery } from 'react-native-zoom-toolkit';
+import { Gallery, type GalleryRefType, type SwipeDirection } from 'react-native-zoom-toolkit';
 
-import { spacing } from '@/src/shared/theme';
+import { radius, spacing } from '@/src/shared/theme';
 import type { PreviewImage } from './assetResolver';
+import { shareFootprintImage } from './download';
 import { formatTakenAt, readTakenAtFromFile } from './imageMetadata';
 import { createVerticalPullHandler } from './previewGestures';
 
+/** 预览里停留多久就把全分辨率那层挂上（毫秒） */
+const PREVIEW_HI_RES_DELAY_MS = 1000;
+/**
+ * 最多同时保留几张全分辨率位图。
+ * 每张 24MP / 10 位约 93MB，所以只留最近看过的几张（前后翻动时不必重新解），
+ * 超出的按最久未访问淘汰；关闭预览全部释放。
+ */
+const PREVIEW_HI_RES_KEEP = 3;
+
+/**
+ * 预览里单张图的两层渲染。
+ *
+ * 关键：**等容器量出真实尺寸之后再挂图片**。
+ * expo-image 的 `enforceEarlyResizing` 是按「视图 bounds × 屏幕倍率」决定解码尺寸的，
+ * 如果加载发生在布局之前、拿到偏小的 bounds，解码出来就是一张很小的图，
+ * 全屏显示会糊得没法看（也正是"竖屏糊、横屏转一圈又好了"的来源）。
+ */
+function PreviewItem({
+  contentFit,
+  hiRes,
+  imageStyle,
+  onError,
+  reloadToken,
+  uri,
+  windowHeight,
+  windowWidth,
+}: {
+  contentFit: 'contain' | 'cover';
+  hiRes: boolean;
+  imageStyle?: StyleProp<ImageStyle>;
+  onError: () => void;
+  reloadToken: number;
+  uri: string;
+  windowHeight: number;
+  windowWidth: number;
+}) {
+  const [measured, setMeasured] = useState(false);
+
+  return (
+    <View
+      onLayout={(event) => {
+        const { height, width } = event.nativeEvent.layout;
+        if (!measured && width > 0 && height > 0) setMeasured(true);
+      }}
+      style={{ height: windowHeight, width: windowWidth }}
+    >
+      {measured ? (
+        <>
+          <ExpoImage
+            cachePolicy="memory-disk"
+            contentFit={contentFit}
+            // 第一层：按屏幕尺寸解码（enforceEarlyResizing 让 ImageIO 直接出小图），
+            // 打开即有图、内存也小；HDR 同样保留（这条路径实测 headroom 仍是 2.30）。
+            enforceEarlyResizing
+            key={`${uri}-${reloadToken}-screen`}
+            onError={onError}
+            priority="high"
+            source={{ uri }}
+            style={[{ height: windowHeight, width: windowWidth }, imageStyle]}
+            transition={0}
+          />
+          {hiRes ? (
+            <ExpoImage
+              // 第二层：全分辨率。放大（或停留 1 秒）后叠上来替换。
+              // - allowDownscaling=false：不要缩到屏幕尺寸，保留原分辨率，放大才清晰；
+              // - 独立 cacheKey：与第一层分开缓存，否则会直接命中那张屏幕尺寸的图。
+              allowDownscaling={false}
+              cachePolicy="memory-disk"
+              contentFit={contentFit}
+              key={`${uri}-${reloadToken}-full`}
+              priority="high"
+              source={{ cacheKey: `${uri}#full`, uri }}
+              style={[StyleSheet.absoluteFill, imageStyle]}
+              transition={120}
+            />
+          ) : null}
+        </>
+      ) : null}
+    </View>
+  );
+}
+
 type FootprintImagePreviewModalProps = {
   action?: React.ReactNode;
+  /**
+   * 是否显示「下载」按钮（保存到相册/分享）。
+   * 默认显示：首页列表与相册页的预览行为保持一致；编辑页的图本来就在本机，传 false。
+   */
+  showDownload?: boolean;
   contentFit?: 'contain' | 'cover';
   imageStyle?: StyleProp<ImageStyle>;
   items: PreviewImage[];
@@ -39,6 +128,7 @@ export function FootprintImagePreviewModal({
   initialIndex = 0,
   onClose,
   onIndexChange,
+  showDownload = true,
 }: FootprintImagePreviewModalProps) {
   const uris = useMemo(() => items.map((entry) => entry.uri), [items]);
   const visible = uris.length > 0;
@@ -46,8 +136,10 @@ export function FootprintImagePreviewModal({
   // 失败的图片（uri -> 重试次数），用于展示「图片不可用」并支持重试
   const [failedUris, setFailedUris] = useState<Record<string, number>>({});
   const [reloadToken, setReloadToken] = useState(0);
-  // 已经触发过「放大看细节」的图（uri）：这些图会多叠一层全分辨率位图
-  const [hiResUris, setHiResUris] = useState<Set<string>>(() => new Set());
+  // 已经挂了全分辨率层的图（最近访问的排在后面）：放大看细节，或停留超过 DWELL 时长都会加进来
+  const [hiResUris, setHiResUris] = useState<string[]>([]);
+  // 横屏查看：只在预览里把屏幕转过来，退出预览恢复竖屏
+  const [landscape, setLandscape] = useState(false);
   // 调用方没带拍摄时间时，自己从本地文件读一次（只在真正看到这张图时才读）
   const [measuredTakenAt, setMeasuredTakenAt] = useState<Record<string, number | null>>({});
 
@@ -62,9 +154,19 @@ export function FootprintImagePreviewModal({
   const takenAtLabel = formatTakenAt(currentTakenAt);
   const currentFailed = currentUri ? Boolean(failedUris[currentUri]) : false;
 
-  useEffect(() => {
+  /**
+   * 打开预览时要**在渲染期**把下标对齐到父组件给的 initialIndex。
+   *
+   * 用 useEffect 会晚一拍：`Gallery` 在 visible 变 true 的那次渲染就挂载了，
+   * 那时内部 index 还是上一次会话留下的值，而 Gallery 只在挂载时读 initialIndex，
+   * 之后改 prop 不会跳页 —— 表现就是「点第 1 张，却打开上次停在第 3 张的那张图」。
+   * 渲染期 setState（React 官方的“派生 state”写法）会在本次提交前重渲染，Gallery 拿到正确下标。
+   */
+  const [openedSession, setOpenedSession] = useState(visible);
+  if (visible !== openedSession) {
+    setOpenedSession(visible);
     if (visible) setIndex(initialIndex);
-  }, [initialIndex, visible]);
+  }
 
   useEffect(() => {
     if (!currentItem || currentItem.takenAt) return;
@@ -116,11 +218,90 @@ export function FootprintImagePreviewModal({
    *
    * Gallery 的 onZoomBegin 走 JS 线程（库内部用 scheduleOnRN），可以直接 setState。
    */
-  const handleZoomBegin = useCallback((zoomIndex: number) => {
-    const uri = uris[zoomIndex];
+  /** 把某张图标记为「要全分辨率」，并按上限淘汰最久没看的那张 */
+  const markHiRes = useCallback((uri: string | null) => {
     if (!uri) return;
-    setHiResUris((previous) => (previous.has(uri) ? previous : new Set(previous).add(uri)));
-  }, [uris]);
+    setHiResUris((previous) => (
+      [...previous.filter((value) => value !== uri), uri].slice(-PREVIEW_HI_RES_KEEP)
+    ));
+  }, []);
+
+  const handleZoomBegin = useCallback((zoomIndex: number) => {
+    markHiRes(uris[zoomIndex] ?? null);
+  }, [markHiRes, uris]);
+
+  // 下载/分享当前这张（大图本身就是原图地址，不需要再取缩略图）
+  const [downloading, setDownloading] = useState(false);
+  const handleDownload = useCallback(async () => {
+    if (!currentUri || downloading) return;
+    setDownloading(true);
+    try {
+      await shareFootprintImage(currentUri);
+    } catch (error) {
+      Alert.alert('下载失败', error instanceof Error ? error.message : '请稍后重试');
+    } finally {
+      setDownloading(false);
+    }
+  }, [currentUri, downloading]);
+
+  /**
+   * 循环滑动：滑到最后一张继续滑，绕回第一张；第一张反方向滑则跳到第最后一张。
+   *
+   * Gallery 在边界处会把位移 clamp 掉（画面不动），但用户回调仍然会收到方向，
+   * 所以这里用 ref 直接跳页；setIndex 会更新 activeIndex，进而触发 onIndexChange，
+   * 计数、拍摄时间、高清层这些都跟着走。
+   */
+  const galleryRef = useRef<GalleryRefType>(null);
+  const handleSwipe = useCallback((direction: SwipeDirection) => {
+    if (uris.length < 2) return;
+    if (direction === 'left' && index >= uris.length - 1) {
+      galleryRef.current?.setIndex(0);
+    } else if (direction === 'right' && index <= 0) {
+      galleryRef.current?.setIndex(uris.length - 1);
+    }
+  }, [index, uris.length]);
+
+  /**
+   * 停留即升级：即使没捏合，某张图看超过 1 秒也把全分辨率那层挂上，
+   * 这样"停下来看细节"和"捏合放大"都能得到清晰画面。
+   * 换图会重新计时；已经加载过的会留在最近访问列表里（见 PREVIEW_HI_RES_KEEP），
+   * 所以来回翻动时不用重新解一遍。
+   */
+  useEffect(() => {
+    if (!visible || !currentUri) return;
+
+    const timer = setTimeout(() => markHiRes(currentUri), PREVIEW_HI_RES_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [visible, currentUri, markHiRes]);
+
+  // 关闭预览就全部释放，别把几十上百 MB 的位图留在后台
+  useEffect(() => {
+    if (!visible) setHiResUris([]);
+  }, [visible]);
+
+  /** 横屏查看：只在预览里转动屏幕，退出预览恢复竖屏（App 本体始终竖屏） */
+  const toggleLandscape = useCallback(() => {
+    setLandscape((previous) => {
+      const next = !previous;
+      void ScreenOrientation.lockAsync(
+        next
+          ? ScreenOrientation.OrientationLock.LANDSCAPE
+          : ScreenOrientation.OrientationLock.PORTRAIT_UP,
+      );
+      return next;
+    });
+  }, []);
+
+  // 关闭预览（或组件卸载）时一定转回竖屏，避免把横屏状态带回列表
+  useEffect(() => {
+    if (visible) return;
+    setLandscape(false);
+    void ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
+  }, [visible]);
+
+  useEffect(() => () => {
+    void ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
+  }, []);
 
   const topOffset = useMemo(() => insets.top + 8, [insets.top]);
   const bottomOffset = useMemo(() => Math.max(insets.bottom, spacing.lg) + spacing.md, [insets.bottom]);
@@ -129,6 +310,9 @@ export function FootprintImagePreviewModal({
     <Modal
       animationType="fade"
       onRequestClose={onClose}
+      // RN 的 Modal 默认只声明竖屏，会把 App 的横屏锁定挡掉（UIKit 报
+      // "Supported orientations has no common orientation"），预览要支持横屏必须在这里放开。
+      supportedOrientations={['portrait', 'landscape-left', 'landscape-right']}
       statusBarTranslucent
       transparent
       visible={visible}
@@ -139,47 +323,31 @@ export function FootprintImagePreviewModal({
           {visible ? (
             <Gallery
               data={uris}
-              initialIndex={initialIndex}
+              // 横竖屏切换后容器尺寸变了，重新挂载让它重新测量；带上当前下标避免跳回第一张
+              initialIndex={index}
+              key={landscape ? 'landscape' : 'portrait'}
               keyExtractor={(uri, itemIndex) => `${uri}-${itemIndex}`}
               maxScale={6}
               onIndexChange={handleIndexChange}
+              onSwipe={handleSwipe}
               onTap={onClose}
               onVerticalPull={handleVerticalPull}
               onZoomBegin={handleZoomBegin}
+              ref={galleryRef}
               renderItem={(uri) => (
-                <View style={{ height: windowHeight, width: windowWidth }}>
-                  <ExpoImage
-                    cachePolicy="memory-disk"
-                    contentFit={contentFit}
-                    // 第一层：按屏幕尺寸解码（enforceEarlyResizing 让 ImageIO 直接出小图），
-                    // 打开即有图、内存也小；HDR 同样保留（这条路径实测 headroom 仍是 2.30）。
-                    enforceEarlyResizing
-                    key={`${uri}-${reloadToken}-screen`}
-                    onError={() => {
-                      setFailedUris((previous) => ({ ...previous, [uri]: (previous[uri] ?? 0) + 1 }));
-                    }}
-                    priority="high"
-                    source={{ uri }}
-                    style={[{ height: windowHeight, width: windowWidth }, imageStyle]}
-                    transition={0}
-                  />
-                  {hiResUris.has(uri) ? (
-                    <ExpoImage
-                      // 放大后叠上全分辨率那层：
-                      // - allowDownscaling=false：不要缩到屏幕尺寸，保留原分辨率，放大才清晰；
-                      // - 独立 cacheKey：SDWebImage 的内存缓存按 key 命中，
-                      //   沿用同一个 key 会直接返回上一层那张小图，等于白解。
-                      allowDownscaling={false}
-                      cachePolicy="memory-disk"
-                      contentFit={contentFit}
-                      key={`${uri}-${reloadToken}-full`}
-                      priority="high"
-                      source={{ cacheKey: `${uri}#full`, uri }}
-                      style={[StyleSheet.absoluteFill, imageStyle]}
-                      transition={120}
-                    />
-                  ) : null}
-                </View>
+                <PreviewItem
+                  contentFit={contentFit}
+                  hiRes={hiResUris.includes(uri)}
+                  imageStyle={imageStyle}
+                  key={uri}
+                  onError={() => {
+                    setFailedUris((previous) => ({ ...previous, [uri]: (previous[uri] ?? 0) + 1 }));
+                  }}
+                  reloadToken={reloadToken}
+                  uri={uri}
+                  windowHeight={windowHeight}
+                  windowWidth={windowWidth}
+                />
               )}
               tapOnEdgeToItem={false}
               windowSize={3}
@@ -206,6 +374,19 @@ export function FootprintImagePreviewModal({
           ) : null}
 
           <Pressable
+            accessibilityLabel={landscape ? '竖屏查看' : '横屏查看'}
+            accessibilityRole="button"
+            onPress={toggleLandscape}
+            style={[styles.closeButton, { right: spacing.lg + 44, top: topOffset }]}
+          >
+            <Ionicons
+              color="#fff"
+              name={landscape ? 'phone-portrait-outline' : 'phone-landscape-outline'}
+              size={20}
+            />
+          </Pressable>
+
+          <Pressable
             accessibilityLabel="关闭图片预览"
             accessibilityRole="button"
             onPress={onClose}
@@ -214,7 +395,28 @@ export function FootprintImagePreviewModal({
             <Ionicons name="close" size={26} color="#fff" />
           </Pressable>
 
-          {action ? <View style={[styles.actionWrap, { bottom: bottomOffset }]}>{action}</View> : null}
+          {visible && (showDownload || action) ? (
+            <View pointerEvents="box-none" style={[styles.actionWrap, { bottom: bottomOffset }]}>
+              <View style={styles.actionRow}>
+                {showDownload ? (
+                  <Pressable
+                    accessibilityLabel={downloading ? '正在下载图片' : '下载图片'}
+                    accessibilityRole="button"
+                    disabled={downloading}
+                    onPress={(event) => {
+                      event.stopPropagation();
+                      void handleDownload();
+                    }}
+                    style={[styles.downloadButton, downloading && styles.downloadButtonDisabled]}
+                  >
+                    <Ionicons name="download-outline" size={18} color="#fff" />
+                    <Text style={styles.downloadButtonText}>{downloading ? '下载中' : '下载'}</Text>
+                  </Pressable>
+                ) : null}
+                {action}
+              </View>
+            </View>
+          ) : null}
         </View>
       </GestureHandlerRootView>
     </Modal>
@@ -222,10 +424,38 @@ export function FootprintImagePreviewModal({
 }
 
 const styles = StyleSheet.create({
+  actionRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: spacing.sm,
+    justifyContent: 'center',
+  },
   actionWrap: {
     left: spacing.lg,
     position: 'absolute',
     right: spacing.lg,
+  },
+  downloadButton: {
+    alignItems: 'center',
+    alignSelf: 'center',
+    backgroundColor: 'rgba(17, 24, 39, 0.76)',
+    borderColor: 'rgba(255, 255, 255, 0.18)',
+    borderRadius: radius.full,
+    borderWidth: 1,
+    flexDirection: 'row',
+    gap: 8,
+    justifyContent: 'center',
+    minHeight: 44,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm,
+  },
+  downloadButtonDisabled: {
+    opacity: 0.45,
+  },
+  downloadButtonText: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: '700',
   },
   closeButton: {
     alignItems: 'center',

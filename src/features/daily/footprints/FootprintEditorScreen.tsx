@@ -376,6 +376,8 @@ export function FootprintEditorScreen({
         initialIndex={previewIndex ?? 0}
         items={previewIndex === null ? [] : previewItems}
         onClose={() => setPreviewIndex(null)}
+        // 编辑页的图片本来就在本机，不需要「下载」这一层
+        showDownload={false}
       />
     </ScreenShell>
   );

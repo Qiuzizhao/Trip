@@ -1,13 +1,12 @@
 import { Ionicons } from '@expo/vector-icons';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Alert, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
+import React, { useEffect, useMemo, useState } from 'react';
+import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { ScreenShell, Item, Tag } from '../_shared/ReplicatedScreens';
 import { colors, radius, spacing, shadow } from '@/src/shared/theme';
 import { buildAssetUrl } from '@/src/shared/api';
 import { listFootprintsLocal } from '@/src/local/repositories/footprintsRepository';
 import { StateView } from '@/src/shared/components';
-import { shareFootprintImage } from './download';
 import { FootprintImagePreviewModal } from './FootprintImagePreviewModal';
 import { FootprintThumbnail } from './FootprintThumbnail';
 import { resolveFootprintImages, type PreviewImage } from './assetResolver';
@@ -34,7 +33,6 @@ export function FootprintAlbumScreen({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [fullIndex, setFullIndex] = useState<number | null>(null);
-  const [downloadingFullImage, setDownloadingFullImage] = useState(false);
   const [resolvedImages, setResolvedImages] = useState<PreviewImage[] | null>(null);
 
   const loadItem = async () => {
@@ -66,19 +64,6 @@ export function FootprintAlbumScreen({
     [item, resolvedImages],
   );
   const images = useMemo(() => imageItems.map((entry) => entry.uri), [imageItems]);
-
-  const handleDownloadFullImage = useCallback(async () => {
-    const currentUri = fullIndex === null ? null : images[fullIndex];
-    if (!currentUri) return;
-    try {
-      setDownloadingFullImage(true);
-      await shareFootprintImage(currentUri);
-    } catch (err) {
-      Alert.alert('下载失败', err instanceof Error ? err.message : '请稍后重试');
-    } finally {
-      setDownloadingFullImage(false);
-    }
-  }, [fullIndex, images]);
 
   return (
     <ScreenShell title="足迹相册" onBack={onBack}>
@@ -156,21 +141,6 @@ export function FootprintAlbumScreen({
         items={fullIndex === null ? [] : imageItems}
         onClose={() => setFullIndex(null)}
         onIndexChange={setFullIndex}
-        action={(
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={downloadingFullImage ? '正在下载图片' : '下载图片'}
-            disabled={downloadingFullImage}
-            onPress={(event) => {
-              event.stopPropagation();
-              void handleDownloadFullImage();
-            }}
-            style={[albumStyles.fullImageToolbarButton, downloadingFullImage && albumStyles.disabled]}
-          >
-            <Ionicons name="download-outline" size={18} color="#fff" />
-            <Text style={albumStyles.fullImageToolbarText}>{downloadingFullImage ? '下载中' : '下载'}</Text>
-          </Pressable>
-        )}
       />
     </ScreenShell>
   );
@@ -288,24 +258,5 @@ const albumStyles = StyleSheet.create({
   },
   disabled: {
     opacity: 0.45,
-  },
-  fullImageToolbarButton: {
-    alignItems: 'center',
-    alignSelf: 'center',
-    backgroundColor: 'rgba(17, 24, 39, 0.76)',
-    borderColor: 'rgba(255, 255, 255, 0.18)',
-    borderRadius: radius.full,
-    borderWidth: 1,
-    flexDirection: 'row',
-    gap: 8,
-    justifyContent: 'center',
-    minHeight: 44,
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.sm,
-  },
-  fullImageToolbarText: {
-    color: '#fff',
-    fontSize: 15,
-    fontWeight: '700',
   },
 });

@@ -1,4 +1,5 @@
 import { Stack } from 'expo-router';
+import * as ScreenOrientation from 'expo-screen-orientation';
 import * as SplashScreen from 'expo-splash-screen';
 import { useEffect } from 'react';
 
@@ -9,6 +10,9 @@ SplashScreen.preventAutoHideAsync().catch(() => undefined);
 
 export default function RootLayout() {
   useEffect(() => {
+    // 允许横屏只是为了「图片预览」里手动横过来看（见 FootprintImagePreviewModal），
+    // App 本体仍然锁竖屏，不会跟着手机转。
+    void ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
     void prewarmFootprintScreenData().finally(() => {
       SplashScreen.hideAsync().catch(() => undefined);
     });

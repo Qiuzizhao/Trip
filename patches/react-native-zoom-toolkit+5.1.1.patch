@@ -1,0 +1,262 @@
+diff --git a/node_modules/react-native-zoom-toolkit/lib/module/commons/utils/getSwipeDirection.js b/node_modules/react-native-zoom-toolkit/lib/module/commons/utils/getSwipeDirection.js
+index 4098a9e..c9b44d3 100644
+--- a/node_modules/react-native-zoom-toolkit/lib/module/commons/utils/getSwipeDirection.js
++++ b/node_modules/react-native-zoom-toolkit/lib/module/commons/utils/getSwipeDirection.js
+@@ -3,6 +3,8 @@
+ const SWIPE_TIME = 175;
+ const SWIPE_VELOCITY = 500;
+ const SWIPE_DISTANCE = 20;
++// Trip patch: 另外接受"拖过一定比例"，慢速拖动也能翻页（系统相册的手感）
++const SWIPE_DRAG_RATIO = 0.25;
+ export const getSwipeDirection = (e, options) => {
+   'worklet';
+ 
+@@ -10,7 +12,8 @@ export const getSwipeDirection = (e, options) => {
+     time,
+     boundaries,
+     position,
+-    translate
++    translate,
++    itemSize = 0
+   } = options;
+ 
+   // @ts-ignore
+@@ -22,10 +25,13 @@ export const getSwipeDirection = (e, options) => {
+   const swipedDistanceX = Math.abs(position.x - e.absoluteX) >= SWIPE_DISTANCE;
+   const swipedDistanceY = Math.abs(position.y - e.absoluteY) >= SWIPE_DISTANCE;
+   const swipedInTime = deltaTime <= SWIPE_TIME;
+-  const swipeRight = e.velocityX >= SWIPE_VELOCITY && swipedDistanceX && swipedInTime;
++  const dragThreshold = itemSize > 0 ? itemSize * SWIPE_DRAG_RATIO : Infinity;
++  const draggedRight = swipedDistanceX && (e.absoluteX - position.x) >= dragThreshold;
++  const draggedLeft = swipedDistanceX && (position.x - e.absoluteX) >= dragThreshold;
++  const swipeRight = (e.velocityX >= SWIPE_VELOCITY && swipedDistanceX && swipedInTime) || draggedRight;
+   const inRightBound = translate.x === boundX;
+   if (swipeRight && inRightBound) return 'right';
+-  const swipeLeft = e.velocityX <= -1 * SWIPE_VELOCITY && swipedDistanceX && swipedInTime;
++  const swipeLeft = (e.velocityX <= -1 * SWIPE_VELOCITY && swipedDistanceX && swipedInTime) || draggedLeft;
+   const inLeftBound = translate.x === -1 * boundX;
+   if (swipeLeft && inLeftBound) return 'left';
+   const swipeUp = e.velocityY <= -1 * SWIPE_VELOCITY && swipedDistanceY && swipedInTime;
+diff --git a/node_modules/react-native-zoom-toolkit/lib/module/components/gallery/GalleryGestureHandler.js b/node_modules/react-native-zoom-toolkit/lib/module/components/gallery/GalleryGestureHandler.js
+index 3bbf4a4..9181be3 100644
+--- a/node_modules/react-native-zoom-toolkit/lib/module/components/gallery/GalleryGestureHandler.js
++++ b/node_modules/react-native-zoom-toolkit/lib/module/components/gallery/GalleryGestureHandler.js
+@@ -100,7 +100,7 @@ const GalleryGestureHandler = ({
+ 
+   // This funcions controls the snapping of the gallery's items when panning
+   // For instance if you slowly pan and let go the item
+-  const snapToScrollPosition = () => {
++  const snapToScrollPosition = (velocity = 0) => {
+     'worklet';
+ 
+     cancelAnimation(scroll);
+@@ -120,9 +120,14 @@ const GalleryGestureHandler = ({
+       gap
+     });
+ 
+-    // Gesture velocity can be used as a second parameter but 0 is fine
+     const toScroll = snapPoint(scroll.value, 0, [prev, current, next]);
+-    scroll.value = withTiming(toScroll, snapTimingConfig, finished => {
++    // Trip patch: 时长跟手势速度走（松手越快动画越短），而不是固定 300ms
++    const snapDistance = Math.abs(toScroll - scroll.value);
++    const snapDuration = clamp(snapDistance / Math.max(Math.abs(velocity), 300) * 1000, 140, 320);
++    scroll.value = withTiming(toScroll, {
++      ...snapTimingConfig,
++      duration: snapDuration
++    }, finished => {
+       if (!finished) return;
+       if (toScroll !== current) {
+         activeIndex.value += toScroll === next ? 1 : -1;
+@@ -131,7 +136,7 @@ const GalleryGestureHandler = ({
+       toScroll !== current && reset(0, 0, minScale, false);
+     });
+   };
+-  const onSwipe = swipeDirection => {
++  const onSwipe = (swipeDirection, velocity = 0) => {
+     'worklet';
+ 
+     cancelAnimation(scroll);
+@@ -152,7 +157,13 @@ const GalleryGestureHandler = ({
+       itemSize: itemSize.value,
+       gap
+     });
+-    scroll.value = withTiming(newScrollPosition, snapTimingConfig, finished => {
++    // Trip patch: 翻页动画时长跟甩动速度走
++    const swipeDistance = Math.abs(newScrollPosition - scroll.value);
++    const swipeDuration = clamp(swipeDistance / Math.max(Math.abs(velocity), 400) * 1000, 160, 380);
++    scroll.value = withTiming(newScrollPosition, {
++      ...snapTimingConfig,
++      duration: swipeDuration
++    }, finished => {
+       if (!finished) {
+         return;
+       }
+@@ -273,6 +284,7 @@ const GalleryGestureHandler = ({
+     const bounds = boundsFn(scale.value);
+     const direction = getSwipeDirection(e, {
+       boundaries: bounds,
++      itemSize: itemSize.value,
+       time: time.value,
+       position: {
+         x: position.x.value,
+@@ -286,7 +298,7 @@ const GalleryGestureHandler = ({
+     const canSwipeHorizontal = !vertical && (direction === 'left' || direction === 'right');
+     const canSwipeVertical = vertical && (direction === 'up' || direction === 'down');
+     if (canSwipeHorizontal || canSwipeVertical) {
+-      onSwipe(direction);
++      onSwipe(direction, e.velocityX);
+     }
+     if (direction !== undefined && onUserSwipe !== undefined) {
+       scheduleOnRN(onUserSwipe, direction);
+@@ -307,7 +319,7 @@ const GalleryGestureHandler = ({
+       scheduleOnRN(onPanEnd, e);
+     }
+     if (snapV || snapH) {
+-      snapToScrollPosition();
++      snapToScrollPosition(e.velocityX);
+     }
+     const configX = {
+       velocity: e.velocityX,
+diff --git a/node_modules/react-native-zoom-toolkit/src/commons/utils/getSwipeDirection.ts b/node_modules/react-native-zoom-toolkit/src/commons/utils/getSwipeDirection.ts
+index 232a61f..c0cb11d 100644
+--- a/node_modules/react-native-zoom-toolkit/src/commons/utils/getSwipeDirection.ts
++++ b/node_modules/react-native-zoom-toolkit/src/commons/utils/getSwipeDirection.ts
+@@ -5,11 +5,14 @@ type SwipeOptions = {
+   boundaries: Vector<number>;
+   position: Vector<number>;
+   translate: Vector<number>;
++  itemSize?: number;
+ };
+ 
+ const SWIPE_TIME = 175;
+ const SWIPE_VELOCITY = 500;
+ const SWIPE_DISTANCE = 20;
++// Trip patch: 另外接受"拖过一定比例"，慢速拖动也能翻页（系统相册的手感）
++const SWIPE_DRAG_RATIO = 0.25;
+ 
+ export const getSwipeDirection = (
+   e: PanGestureEvent,
+@@ -17,7 +20,7 @@ export const getSwipeDirection = (
+ ): SwipeDirection | undefined => {
+   'worklet';
+ 
+-  const { time, boundaries, position, translate } = options;
++  const { time, boundaries, position, translate, itemSize = 0 } = options;
+ 
+   // @ts-ignore
+   const deltaTime = performance.now() - time;
+@@ -27,14 +30,22 @@ export const getSwipeDirection = (
+   const swipedDistanceY = Math.abs(position.y - e.absoluteY) >= SWIPE_DISTANCE;
+   const swipedInTime = deltaTime <= SWIPE_TIME;
+ 
++  const dragThreshold = itemSize > 0 ? itemSize * SWIPE_DRAG_RATIO : Infinity;
++  const draggedRight =
++    swipedDistanceX && e.absoluteX - position.x >= dragThreshold;
++  const draggedLeft =
++    swipedDistanceX && position.x - e.absoluteX >= dragThreshold;
++
+   const swipeRight =
+-    e.velocityX >= SWIPE_VELOCITY && swipedDistanceX && swipedInTime;
++    (e.velocityX >= SWIPE_VELOCITY && swipedDistanceX && swipedInTime) ||
++    draggedRight;
+ 
+   const inRightBound = translate.x === boundX;
+   if (swipeRight && inRightBound) return 'right';
+ 
+   const swipeLeft =
+-    e.velocityX <= -1 * SWIPE_VELOCITY && swipedDistanceX && swipedInTime;
++    (e.velocityX <= -1 * SWIPE_VELOCITY && swipedDistanceX && swipedInTime) ||
++    draggedLeft;
+ 
+   const inLeftBound = translate.x === -1 * boundX;
+   if (swipeLeft && inLeftBound) return 'left';
+diff --git a/node_modules/react-native-zoom-toolkit/src/components/gallery/GalleryGestureHandler.tsx b/node_modules/react-native-zoom-toolkit/src/components/gallery/GalleryGestureHandler.tsx
+index cd4b7bd..443dda1 100644
+--- a/node_modules/react-native-zoom-toolkit/src/components/gallery/GalleryGestureHandler.tsx
++++ b/node_modules/react-native-zoom-toolkit/src/components/gallery/GalleryGestureHandler.tsx
+@@ -149,7 +149,7 @@ const GalleryGestureHandler = ({
+ 
+   // This funcions controls the snapping of the gallery's items when panning
+   // For instance if you slowly pan and let go the item
+-  const snapToScrollPosition = () => {
++  const snapToScrollPosition = (velocity = 0) => {
+     'worklet';
+ 
+     cancelAnimation(scroll);
+@@ -170,10 +170,20 @@ const GalleryGestureHandler = ({
+       gap,
+     });
+ 
+-    // Gesture velocity can be used as a second parameter but 0 is fine
+     const toScroll = snapPoint(scroll.value, 0, [prev, current, next]);
+ 
+-    scroll.value = withTiming(toScroll, snapTimingConfig, (finished) => {
++    // Trip patch: 时长跟手势速度走（松手越快动画越短），而不是固定 300ms
++    const snapDistance = Math.abs(toScroll - scroll.value);
++    const snapDuration = clamp(
++      (snapDistance / Math.max(Math.abs(velocity), 300)) * 1000,
++      140,
++      320,
++    );
++
++    scroll.value = withTiming(
++      toScroll,
++      { ...snapTimingConfig, duration: snapDuration },
++      (finished) => {
+       if (!finished) return;
+       if (toScroll !== current) {
+         activeIndex.value += toScroll === next ? 1 : -1;
+@@ -184,7 +194,7 @@ const GalleryGestureHandler = ({
+     });
+   };
+ 
+-  const onSwipe = (swipeDirection: SwipeDirection) => {
++  const onSwipe = (swipeDirection: SwipeDirection, velocity = 0) => {
+     'worklet';
+ 
+     cancelAnimation(scroll);
+@@ -211,9 +221,17 @@ const GalleryGestureHandler = ({
+       gap,
+     });
+ 
++    // Trip patch: 翻页动画时长跟甩动速度走
++    const swipeDistance = Math.abs(newScrollPosition - scroll.value);
++    const swipeDuration = clamp(
++      (swipeDistance / Math.max(Math.abs(velocity), 400)) * 1000,
++      160,
++      380,
++    );
++
+     scroll.value = withTiming(
+       newScrollPosition,
+-      snapTimingConfig,
++      { ...snapTimingConfig, duration: swipeDuration },
+       (finished) => {
+         if (!finished) {
+           return;
+@@ -372,6 +390,7 @@ const GalleryGestureHandler = ({
+       const bounds = boundsFn(scale.value);
+       const direction = getSwipeDirection(e, {
+         boundaries: bounds,
++        itemSize: itemSize.value,
+         time: time.value,
+         position: { x: position.x.value, y: position.y.value },
+         translate: {
+@@ -387,7 +406,7 @@ const GalleryGestureHandler = ({
+         vertical && (direction === 'up' || direction === 'down');
+ 
+       if (canSwipeHorizontal || canSwipeVertical) {
+-        onSwipe(direction);
++        onSwipe(direction, e.velocityX);
+       }
+ 
+       if (direction !== undefined && onUserSwipe !== undefined) {
+@@ -414,7 +433,7 @@ const GalleryGestureHandler = ({
+       }
+ 
+       if (snapV || snapH) {
+-        snapToScrollPosition();
++        snapToScrollPosition(e.velocityX);
+       }
+ 
+       const configX = { velocity: e.velocityX, clamp: [-bounds.x, bounds.x] };

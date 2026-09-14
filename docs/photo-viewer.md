@@ -39,6 +39,59 @@ Provider，不是内部那个 `reference` 属性）。
 > 提示：本机 Device Hub 无法合成带速度的 fling 手势，循环这步是用相同的处理函数直接触发验证的
 > （打开第 2 张 → 触发边界左滑 → 计数回到 1/2），实际滑动手感需要在真机上确认。
 
+## 滑动手感：补丁放宽了翻页判定
+
+`react-native-zoom-toolkit` 原版的翻页判定很苛刻（`utils/getSwipeDirection`）：
+
+```js
+const SWIPE_TIME = 175;      // 必须是手势最后 175ms 内的动作
+const SWIPE_VELOCITY = 500;  // 速度必须 ≥ 500 px/s（也就是必须"甩"）
+const SWIPE_DISTANCE = 20;
+```
+
+三个条件同时满足才翻页 —— 所以慢慢拖不翻、从左半边起手加不起速也不翻，手感很涩。
+补丁（`patches/react-native-zoom-toolkit+5.1.1.patch`，由 `postinstall` 自动套用）额外接受：
+
+```js
+// 拖过 itemSize 的 25% 也算翻页（系统相册的手感），快速甩动的老行为保持不变
+const SWIPE_DRAG_RATIO = 0.25;
+```
+
+调用处同时把 `itemSize` 传进判定函数（TS 源码与 `lib/module` 编译产物都改，避免打包走哪份都能生效）。
+回归测试 `__tests__/gallerySwipePatch.test.ts` 直接读 node_modules 里的实现来断言三条行为
+（慢拖 50% 翻页 / 慢拖 5% 不翻页 / 快速甩动照旧）—— 补丁哪天没应用上，测试会直接失败。
+
+## 快速翻页不再卡住
+
+「停留 1 秒加载全分辨率」这条规则原本是**任何时刻**都在计时，于是快速连续翻页时，
+每翻到一张就会启动一次 24MP 解码（约 1 秒 CPU），主线程被拖住、手势排队，
+卡顿结束后积压的滑动一次性生效 —— 表现就是"卡住、然后一下跳好几张"。
+
+现在改成**手势停止后才计时**：`onPanStart` / `onZoomBegin` 时挂起计时，
+`onPanEnd` / `onZoomEnd` 后重新计 1 秒。快速翻页期间不再触发全分辨率解码，
+手指停下来 1 秒才升级清晰度。
+
+## 动画：翻页时长跟手、下拉收起跟手
+
+**翻页（左右滑动）**：库里原本无论甩得多快都用固定的 `snapTimingConfig = { duration: 300,
+easing: Easing.out(Easing.cubic) }` —— 快甩时显得"动画追不上手指"，慢拖时又显得拖沓。补丁改成按速度算时长：
+
+```js
+// 翻页：距离 / 速度，钳在 160–380ms
+const swipeDuration = clamp(swipeDistance / Math.max(Math.abs(velocity), 400) * 1000, 160, 380);
+// 松手回位（没够到翻页）：钳在 140–320ms
+const snapDuration = clamp(snapDistance / Math.max(Math.abs(velocity), 300) * 1000, 140, 320);
+```
+
+调用处把 `e.velocityX` 传进 `onSwipe` 与 `snapToScrollPosition`（TS 源码与 `lib/module` 编译产物同时改）。
+
+**下拉关闭**：以前松手后库会先把图片 `withTiming(0)` 弹回原位，紧接着 Modal 淡出 ——
+看起来像"先弹回去、再消失"。现在（`previewGestures.ts`）用一个共享值 `pull` 记录下拉位移：
+
+- 拖动过程中实时把位移写进去，预览容器同步变淡（最多淡到 30%）、轻微缩小 —— 跟手；
+- 松手且超过阈值：顺着松手方向**再走一段**（170ms）后才真正关闭，像是在把图"甩出去"；
+- 松手但没到阈值：220ms 顺滑回位。
+
 ## 横屏查看的实现要点
 
 1. **原生方向要放开**：`app.json` 的 `orientation` 从 `portrait` 改成 `default`，

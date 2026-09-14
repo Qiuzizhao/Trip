@@ -16,6 +16,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Gallery, type GalleryRefType, type SwipeDirection } from 'react-native-zoom-toolkit';
 
 import { radius, spacing } from '@/src/shared/theme';
+import Animated, { useAnimatedStyle, useSharedValue } from 'react-native-reanimated';
 import type { PreviewImage } from './assetResolver';
 import { shareFootprintImage } from './download';
 import { formatTakenAt, readTakenAtFromFile } from './imageMetadata';
@@ -138,8 +139,21 @@ export function FootprintImagePreviewModal({
   const [reloadToken, setReloadToken] = useState(0);
   // 已经挂了全分辨率层的图（最近访问的排在后面）：放大看细节，或停留超过 DWELL 时长都会加进来
   const [hiResUris, setHiResUris] = useState<string[]>([]);
+  // 手势进行中：这期间不启动「停留 1 秒升级全分辨率」的计时。
+  // 快速左右翻页时每张都启动一次 24MP 解码会把主线程拖住，手势排队，
+  // 卡顿结束后积压的滑动一次性生效（表现为"卡住、然后一下跳好几张"）。
+  const [interacting, setInteracting] = useState(false);
   // 横屏查看：只在预览里把屏幕转过来，退出预览恢复竖屏
   const [landscape, setLandscape] = useState(false);
+  // 下拉收起的位移（跟手）：容器据此同步变淡、轻微缩小
+  const pull = useSharedValue(0);
+  const overlayAnimatedStyle = useAnimatedStyle(() => {
+    const progress = Math.min(1, Math.abs(pull.value) / 320);
+    return {
+      opacity: 1 - progress * 0.7,
+      transform: [{ scale: 1 - progress * 0.06 }],
+    };
+  });
   // 调用方没带拍摄时间时，自己从本地文件读一次（只在真正看到这张图时才读）
   const [measuredTakenAt, setMeasuredTakenAt] = useState<Record<string, number | null>>({});
 
@@ -198,8 +212,8 @@ export function FootprintImagePreviewModal({
   // Gallery 会在 UI 线程的 worklet 里直接调用它，所以必须由 createVerticalPullHandler 生成 worklet，
   // 不能直接传普通函数（那会闪退，见 previewGestures.ts）。
   const handleVerticalPull = useMemo(
-    () => createVerticalPullHandler(onClose),
-    [onClose],
+    () => createVerticalPullHandler(onClose, pull),
+    [onClose, pull],
   );
 
   const handleRetry = useCallback(() => {
@@ -227,8 +241,13 @@ export function FootprintImagePreviewModal({
   }, []);
 
   const handleZoomBegin = useCallback((zoomIndex: number) => {
+    setInteracting(true);
     markHiRes(uris[zoomIndex] ?? null);
   }, [markHiRes, uris]);
+
+  const handleZoomEnd = useCallback(() => setInteracting(false), []);
+  const handlePanStart = useCallback(() => setInteracting(true), []);
+  const handlePanEnd = useCallback(() => setInteracting(false), []);
 
   // 下载/分享当前这张（大图本身就是原图地址，不需要再取缩略图）
   const [downloading, setDownloading] = useState(false);
@@ -268,11 +287,11 @@ export function FootprintImagePreviewModal({
    * 所以来回翻动时不用重新解一遍。
    */
   useEffect(() => {
-    if (!visible || !currentUri) return;
+    if (!visible || !currentUri || interacting) return;
 
     const timer = setTimeout(() => markHiRes(currentUri), PREVIEW_HI_RES_DELAY_MS);
     return () => clearTimeout(timer);
-  }, [visible, currentUri, markHiRes]);
+  }, [visible, currentUri, markHiRes, interacting]);
 
   // 关闭预览就全部释放，别把几十上百 MB 的位图留在后台
   useEffect(() => {
@@ -319,7 +338,8 @@ export function FootprintImagePreviewModal({
     >
       {/* Modal 渲染在独立的原生根视图里，手势必须自己包一层 GestureHandlerRootView */}
       <GestureHandlerRootView style={styles.root}>
-        <View style={styles.overlay}>
+        {/* 下拉时整体跟手变淡、轻微缩小，松手后由 previewGestures 把动画走完再关闭 */}
+        <Animated.View style={[styles.overlay, overlayAnimatedStyle]}>
           {visible ? (
             <Gallery
               data={uris}
@@ -329,10 +349,13 @@ export function FootprintImagePreviewModal({
               keyExtractor={(uri, itemIndex) => `${uri}-${itemIndex}`}
               maxScale={6}
               onIndexChange={handleIndexChange}
+              onPanEnd={handlePanEnd}
+              onPanStart={handlePanStart}
               onSwipe={handleSwipe}
               onTap={onClose}
               onVerticalPull={handleVerticalPull}
               onZoomBegin={handleZoomBegin}
+              onZoomEnd={handleZoomEnd}
               ref={galleryRef}
               renderItem={(uri) => (
                 <PreviewItem
@@ -417,7 +440,7 @@ export function FootprintImagePreviewModal({
               </View>
             </View>
           ) : null}
-        </View>
+        </Animated.View>
       </GestureHandlerRootView>
     </Modal>
   );

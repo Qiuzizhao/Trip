@@ -71,6 +71,44 @@ const SWIPE_DRAG_RATIO = 0.25;
 `onPanEnd` / `onZoomEnd` 后重新计 1 秒。快速翻页期间不再触发全分辨率解码，
 手指停下来 1 秒才升级清晰度。
 
+### 补一刀：手势结束信号不可靠
+
+上面这条依赖 `onPanEnd`，但库里它只在**非滑动**的手势结束时才回调
+（`GalleryGestureHandler`：`if (direction === undefined && onPanEnd) …`）。
+结果滑动过一次之后 `interacting` 永远停在 true，**"停留 1 秒升级"再也不触发**
+（捏合放大走的是另一条路径，所以那种情况仍然有效 —— 正好对应"停留没用、放大有用"）。
+
+现在改成任何一个结束信号都会清掉：`onPanEnd` / `onSwipe` / `onGestureEnd` / `onZoomEnd`，
+外加 1.5 秒兜底计时（万一某条路径又漏了事件，最多挂起 1.5 秒就恢复）。
+
+## 循环滑动的动画
+
+循环原本是滑到边界后调 `galleryRef.setIndex()` —— 库内部是**直接赋值**（`scroll.value = …`），
+所以是硬切闪烁，没有过渡动画。
+
+现在改成最经典的首尾克隆（`previewPager.ts`）：
+
+```
+数据 = [最后一张, 第一张, 第二张, …, 最后一张, 第一张]
+        ↑ 克隆                                    ↑ 克隆
+```
+
+- 两个方向都能滑出完整的滑动动画（不再是硬切）；
+- 滑到克隆项后立刻**无声跳回**对应真实项（克隆与真实内容一致，看不到跳）；
+- 真实下标与 Gallery 位置的互换算在 `previewIndex` 系列纯函数里，并有单测覆盖
+  （`__tests__/previewPager.test.ts`：映射往返、首尾克隆折回、单图不循环）。
+
+## 下拉收起不弹回
+
+库在垂直下拉松手时**无条件**把图片弹回原位（`translate.y.value = withTiming(0, …)`），
+不区分使用方是否要关闭 —— 所以"下拉收不干净"：图片先弹回，然后才整体淡出。
+
+补丁（`react-native-zoom-toolkit+5.1.1.patch`）里加了：位移超过 80（与 App 侧
+`VERTICAL_PULL_CLOSE_THRESHOLD` 一致）就**保持位移不弹回**，交给 `previewGestures`
+把收起动画走完再关闭。注意不能顺手把 `isPullingVertical` 置回 false ——
+下面的 `useAnimatedReaction` 只在 `isPulling` 为真时回调 `onVerticalPull`，
+置回 false 会让"松手关闭"整个丢失。
+
 ## 动画：翻页时长跟手、下拉收起跟手
 
 **翻页（左右滑动）**：库里原本无论甩得多快都用固定的 `snapTimingConfig = { duration: 300,

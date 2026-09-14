@@ -20,6 +20,7 @@ import Animated, { useAnimatedStyle, useSharedValue } from 'react-native-reanima
 import type { PreviewImage } from './assetResolver';
 import { shareFootprintImage } from './download';
 import { formatTakenAt, readTakenAtFromFile } from './imageMetadata';
+import { buildPreviewPages, isClonePage, previewRealIndex, previewVisualIndex } from './previewPager';
 import { createVerticalPullHandler } from './previewGestures';
 
 /** 预览里停留多久就把全分辨率那层挂上（毫秒） */
@@ -143,6 +144,7 @@ export function FootprintImagePreviewModal({
   // 快速左右翻页时每张都启动一次 24MP 解码会把主线程拖住，手势排队，
   // 卡顿结束后积压的滑动一次性生效（表现为"卡住、然后一下跳好几张"）。
   const [interacting, setInteracting] = useState(false);
+  const galleryRef = useRef<GalleryRefType>(null);
   // 横屏查看：只在预览里把屏幕转过来，退出预览恢复竖屏
   const [landscape, setLandscape] = useState(false);
   // 下拉收起的位移（跟手）：容器据此同步变淡、轻微缩小
@@ -203,10 +205,31 @@ export function FootprintImagePreviewModal({
     if (around.length) void ExpoImage.prefetch(around, 'memory-disk');
   }, [index, uris, visible]);
 
-  const handleIndexChange = useCallback((nextIndex: number) => {
-    setIndex(nextIndex);
-    onIndexChange?.(nextIndex);
-  }, [onIndexChange]);
+  /**
+   * 无限循环：Gallery 是线性滚动，做不到"从头绕回尾"的滑动动画，
+   * 所以数据首尾各补一张（最后一张放到最前、第一张放到最后）：
+   * 滑到克隆项后再"无声"跳回真实项（内容一模一样，看不出跳），
+   * 这样两个方向都能滑出完整的滑动动画，而不是之前的硬切闪烁。
+   */
+  const count = uris.length;
+  const infinite = count > 1;
+  const galleryData = useMemo(() => buildPreviewPages(uris), [uris]);
+  const toVisualIndex = useCallback((realIndex: number) => previewVisualIndex(realIndex, count), [count]);
+  const toRealIndex = useCallback((visualIndex: number) => previewRealIndex(visualIndex, count), [count]);
+
+  const handleIndexChange = useCallback((visualIndex: number) => {
+    const realIndex = toRealIndex(visualIndex);
+    setIndex(realIndex);
+    onIndexChange?.(realIndex);
+    // 任何一次翻页都意味着手势结束了（库在"滑动"这条路径不回调 onPanEnd，
+    // 不在这里清掉的话 interacting 会一直挂起，停留升级就再也不触发）
+    setInteracting(false);
+
+    // 落在克隆项上：立刻无动画跳回对应真实项
+    if (isClonePage(visualIndex, count)) {
+      requestAnimationFrame(() => galleryRef.current?.setIndex(toVisualIndex(realIndex)));
+    }
+  }, [count, onIndexChange, toRealIndex, toVisualIndex]);
 
   // 下拉超过阈值并松手时关闭（和系统「照片」一致的手感）。
   // Gallery 会在 UI 线程的 worklet 里直接调用它，所以必须由 createVerticalPullHandler 生成 worklet，
@@ -248,6 +271,15 @@ export function FootprintImagePreviewModal({
   const handleZoomEnd = useCallback(() => setInteracting(false), []);
   const handlePanStart = useCallback(() => setInteracting(true), []);
   const handlePanEnd = useCallback(() => setInteracting(false), []);
+  const handleGestureEnd = useCallback(() => setInteracting(false), []);
+
+  // 兜底：万一某条手势路径没有回调"结束"，最多挂起 1.5 秒就自动恢复，
+  // 保证"停留 1 秒升级清晰度"不会因为一次丢事件而永久失效。
+  useEffect(() => {
+    if (!interacting) return;
+    const timer = setTimeout(() => setInteracting(false), 1500);
+    return () => clearTimeout(timer);
+  }, [interacting]);
 
   // 下载/分享当前这张（大图本身就是原图地址，不需要再取缩略图）
   const [downloading, setDownloading] = useState(false);
@@ -264,21 +296,10 @@ export function FootprintImagePreviewModal({
   }, [currentUri, downloading]);
 
   /**
-   * 循环滑动：滑到最后一张继续滑，绕回第一张；第一张反方向滑则跳到第最后一张。
-   *
-   * Gallery 在边界处会把位移 clamp 掉（画面不动），但用户回调仍然会收到方向，
-   * 所以这里用 ref 直接跳页；setIndex 会更新 activeIndex，进而触发 onIndexChange，
-   * 计数、拍摄时间、高清层这些都跟着走。
+   * 手势结束信号：库里"滑动"这条路径不会回调 onPanEnd，
+   * 所以 onSwipe 这里必须把 interacting 清掉（否则停留升级会一直挂起）。
    */
-  const galleryRef = useRef<GalleryRefType>(null);
-  const handleSwipe = useCallback((direction: SwipeDirection) => {
-    if (uris.length < 2) return;
-    if (direction === 'left' && index >= uris.length - 1) {
-      galleryRef.current?.setIndex(0);
-    } else if (direction === 'right' && index <= 0) {
-      galleryRef.current?.setIndex(uris.length - 1);
-    }
-  }, [index, uris.length]);
+  const handleSwipe = useCallback((_direction: SwipeDirection) => setInteracting(false), []);
 
   /**
    * 停留即升级：即使没捏合，某张图看超过 1 秒也把全分辨率那层挂上，
@@ -342,13 +363,14 @@ export function FootprintImagePreviewModal({
         <Animated.View style={[styles.overlay, overlayAnimatedStyle]}>
           {visible ? (
             <Gallery
-              data={uris}
+              data={galleryData}
               // 横竖屏切换后容器尺寸变了，重新挂载让它重新测量；带上当前下标避免跳回第一张
-              initialIndex={index}
+              initialIndex={toVisualIndex(index)}
               key={landscape ? 'landscape' : 'portrait'}
               keyExtractor={(uri, itemIndex) => `${uri}-${itemIndex}`}
               maxScale={6}
               onIndexChange={handleIndexChange}
+              onGestureEnd={handleGestureEnd}
               onPanEnd={handlePanEnd}
               onPanStart={handlePanStart}
               onSwipe={handleSwipe}
@@ -357,12 +379,13 @@ export function FootprintImagePreviewModal({
               onZoomBegin={handleZoomBegin}
               onZoomEnd={handleZoomEnd}
               ref={galleryRef}
-              renderItem={(uri) => (
+              renderItem={(uri, itemIndex) => (
                 <PreviewItem
                   contentFit={contentFit}
                   hiRes={hiResUris.includes(uri)}
                   imageStyle={imageStyle}
-                  key={uri}
+                  // 首尾克隆项和真实项是同一个 uri，key 必须带上位置
+                  key={`${uri}-${itemIndex}`}
                   onError={() => {
                     setFailedUris((previous) => ({ ...previous, [uri]: (previous[uri] ?? 0) + 1 }));
                   }}

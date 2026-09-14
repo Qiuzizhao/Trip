@@ -38,10 +38,19 @@ index 4098a9e..c9b44d3 100644
    if (swipeLeft && inLeftBound) return 'left';
    const swipeUp = e.velocityY <= -1 * SWIPE_VELOCITY && swipedDistanceY && swipedInTime;
 diff --git a/node_modules/react-native-zoom-toolkit/lib/module/components/gallery/GalleryGestureHandler.js b/node_modules/react-native-zoom-toolkit/lib/module/components/gallery/GalleryGestureHandler.js
-index 3bbf4a4..9181be3 100644
+index 3bbf4a4..b1d8726 100644
 --- a/node_modules/react-native-zoom-toolkit/lib/module/components/gallery/GalleryGestureHandler.js
 +++ b/node_modules/react-native-zoom-toolkit/lib/module/components/gallery/GalleryGestureHandler.js
-@@ -100,7 +100,7 @@ const GalleryGestureHandler = ({
+@@ -14,6 +14,8 @@ import { GalleryContext } from "./context.js";
+ import { getScrollPosition } from "../../commons/utils/getScrollPosition.js";
+ import { jsx as _jsx } from "react/jsx-runtime";
+ const minScale = 1;
++// Trip patch: 下拉超过这个距离就"不收回去"，由使用方接着做收起动画并关闭
++const VERTICAL_PULL_KEEP_THRESHOLD = 80;
+ /*
+  * Pinchable views are really heavy components, therefore in order to maximize performance
+  * only a single pinchable view is shared among all the list items, items listen to this
+@@ -100,7 +102,7 @@ const GalleryGestureHandler = ({
  
    // This funcions controls the snapping of the gallery's items when panning
    // For instance if you slowly pan and let go the item
@@ -50,7 +59,7 @@ index 3bbf4a4..9181be3 100644
      'worklet';
  
      cancelAnimation(scroll);
-@@ -120,9 +120,14 @@ const GalleryGestureHandler = ({
+@@ -120,9 +122,14 @@ const GalleryGestureHandler = ({
        gap
      });
  
@@ -67,7 +76,7 @@ index 3bbf4a4..9181be3 100644
        if (!finished) return;
        if (toScroll !== current) {
          activeIndex.value += toScroll === next ? 1 : -1;
-@@ -131,7 +136,7 @@ const GalleryGestureHandler = ({
+@@ -131,7 +138,7 @@ const GalleryGestureHandler = ({
        toScroll !== current && reset(0, 0, minScale, false);
      });
    };
@@ -76,7 +85,7 @@ index 3bbf4a4..9181be3 100644
      'worklet';
  
      cancelAnimation(scroll);
-@@ -152,7 +157,13 @@ const GalleryGestureHandler = ({
+@@ -152,7 +159,13 @@ const GalleryGestureHandler = ({
        itemSize: itemSize.value,
        gap
      });
@@ -91,7 +100,7 @@ index 3bbf4a4..9181be3 100644
        if (!finished) {
          return;
        }
-@@ -273,6 +284,7 @@ const GalleryGestureHandler = ({
+@@ -273,6 +286,7 @@ const GalleryGestureHandler = ({
      const bounds = boundsFn(scale.value);
      const direction = getSwipeDirection(e, {
        boundaries: bounds,
@@ -99,7 +108,7 @@ index 3bbf4a4..9181be3 100644
        time: time.value,
        position: {
          x: position.x.value,
-@@ -286,7 +298,7 @@ const GalleryGestureHandler = ({
+@@ -286,13 +300,19 @@ const GalleryGestureHandler = ({
      const canSwipeHorizontal = !vertical && (direction === 'left' || direction === 'right');
      const canSwipeVertical = vertical && (direction === 'up' || direction === 'down');
      if (canSwipeHorizontal || canSwipeVertical) {
@@ -108,7 +117,19 @@ index 3bbf4a4..9181be3 100644
      }
      if (direction !== undefined && onUserSwipe !== undefined) {
        scheduleOnRN(onUserSwipe, direction);
-@@ -307,7 +319,7 @@ const GalleryGestureHandler = ({
+     }
+     if (isPullingVertical.value) {
+       pullReleased.value = true;
++      // Trip patch: 超过阈值时保持位移（不弹回原位）。
++      // 注意不能在这里把 isPullingVertical 置回 false —— 下面的 reaction 只在
++      // isPulling 为真时才回调 onVerticalPull，置回 false 会让"松手关闭"丢失。
++      if (Math.abs(translate.y.value) > VERTICAL_PULL_KEEP_THRESHOLD) {
++        return;
++      }
+       translate.y.value = withTiming(0, undefined, finished => {
+         isPullingVertical.value = !finished;
+         pullReleased.value = !finished;
+@@ -307,7 +327,7 @@ const GalleryGestureHandler = ({
        scheduleOnRN(onPanEnd, e);
      }
      if (snapV || snapH) {
@@ -171,10 +192,19 @@ index 232a61f..c0cb11d 100644
    const inLeftBound = translate.x === -1 * boundX;
    if (swipeLeft && inLeftBound) return 'left';
 diff --git a/node_modules/react-native-zoom-toolkit/src/components/gallery/GalleryGestureHandler.tsx b/node_modules/react-native-zoom-toolkit/src/components/gallery/GalleryGestureHandler.tsx
-index cd4b7bd..443dda1 100644
+index cd4b7bd..2f15ddd 100644
 --- a/node_modules/react-native-zoom-toolkit/src/components/gallery/GalleryGestureHandler.tsx
 +++ b/node_modules/react-native-zoom-toolkit/src/components/gallery/GalleryGestureHandler.tsx
-@@ -149,7 +149,7 @@ const GalleryGestureHandler = ({
+@@ -32,6 +32,8 @@ import { type GalleryProps } from './types';
+ import { getScrollPosition } from '../../commons/utils/getScrollPosition';
+ 
+ const minScale = 1;
++// Trip patch: 下拉超过这个距离就"不收回去"，由使用方接着做收起动画并关闭
++const VERTICAL_PULL_KEEP_THRESHOLD = 80;
+ 
+ type GalleryGestureHandlerProps = {
+   length: number;
+@@ -149,7 +151,7 @@ const GalleryGestureHandler = ({
  
    // This funcions controls the snapping of the gallery's items when panning
    // For instance if you slowly pan and let go the item
@@ -183,7 +213,7 @@ index cd4b7bd..443dda1 100644
      'worklet';
  
      cancelAnimation(scroll);
-@@ -170,10 +170,20 @@ const GalleryGestureHandler = ({
+@@ -170,10 +172,20 @@ const GalleryGestureHandler = ({
        gap,
      });
  
@@ -206,7 +236,7 @@ index cd4b7bd..443dda1 100644
        if (!finished) return;
        if (toScroll !== current) {
          activeIndex.value += toScroll === next ? 1 : -1;
-@@ -184,7 +194,7 @@ const GalleryGestureHandler = ({
+@@ -184,7 +196,7 @@ const GalleryGestureHandler = ({
      });
    };
  
@@ -215,7 +245,7 @@ index cd4b7bd..443dda1 100644
      'worklet';
  
      cancelAnimation(scroll);
-@@ -211,9 +221,17 @@ const GalleryGestureHandler = ({
+@@ -211,9 +223,17 @@ const GalleryGestureHandler = ({
        gap,
      });
  
@@ -234,7 +264,7 @@ index cd4b7bd..443dda1 100644
        (finished) => {
          if (!finished) {
            return;
-@@ -372,6 +390,7 @@ const GalleryGestureHandler = ({
+@@ -372,6 +392,7 @@ const GalleryGestureHandler = ({
        const bounds = boundsFn(scale.value);
        const direction = getSwipeDirection(e, {
          boundaries: bounds,
@@ -242,7 +272,7 @@ index cd4b7bd..443dda1 100644
          time: time.value,
          position: { x: position.x.value, y: position.y.value },
          translate: {
-@@ -387,7 +406,7 @@ const GalleryGestureHandler = ({
+@@ -387,7 +408,7 @@ const GalleryGestureHandler = ({
          vertical && (direction === 'up' || direction === 'down');
  
        if (canSwipeHorizontal || canSwipeVertical) {
@@ -251,7 +281,20 @@ index cd4b7bd..443dda1 100644
        }
  
        if (direction !== undefined && onUserSwipe !== undefined) {
-@@ -414,7 +433,7 @@ const GalleryGestureHandler = ({
+@@ -396,6 +417,12 @@ const GalleryGestureHandler = ({
+ 
+       if (isPullingVertical.value) {
+         pullReleased.value = true;
++        // Trip patch: 超过阈值时保持位移（不弹回原位）。
++        // 这里不能把 isPullingVertical 置回 false —— 下面的 reaction 只在 isPulling
++        // 为真时才回调 onVerticalPull，置回 false 会让"松手关闭"丢失。
++        if (Math.abs(translate.y.value) > VERTICAL_PULL_KEEP_THRESHOLD) {
++          return;
++        }
+         translate.y.value = withTiming(0, undefined, (finished) => {
+           isPullingVertical.value = !finished;
+           pullReleased.value = !finished;
+@@ -414,7 +441,7 @@ const GalleryGestureHandler = ({
        }
  
        if (snapV || snapH) {

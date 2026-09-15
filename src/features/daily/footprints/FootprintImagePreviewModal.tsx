@@ -21,6 +21,7 @@ import { shareFootprintImage } from './download';
 import { formatTakenAt, readTakenAtFromFile } from './imageMetadata';
 import { buildPreviewPages, isClonePage, previewRealIndex, previewVisualIndex } from './previewPager';
 import { createVerticalPullHandler } from './previewGestures';
+import { debugLog } from './previewDebugLog';
 
 /** 预览里停留多久就把全分辨率那层挂上（毫秒） */
 const PREVIEW_HI_RES_DELAY_MS = 1000;
@@ -195,6 +196,10 @@ export function FootprintImagePreviewModal({
       setIndex(initialIndex);
       openedAtRef.current = Date.now();
     }
+    // 下拉状态活在组件上（Modal 关闭不会卸载它），必须在每次开/关时清干净：
+    // 关闭走的是"不恢复黑底"的路径（避免卸载前闪一帧纯黑），
+    // 如果这里不清，下次打开预览时黑底会一直是透明的。
+    setPulling(false);
   }
 
   useEffect(() => {
@@ -290,14 +295,20 @@ export function FootprintImagePreviewModal({
   }, []);
 
   const handleZoomBegin = useCallback((zoomIndex: number) => {
+    debugLog(`zoomBegin index=${zoomIndex}`);
     setInteracting(true);
     markHiRes(uris[zoomIndex] ?? null);
   }, [markHiRes, uris]);
 
-  const handleZoomEnd = useCallback(() => setInteracting(false), []);
+  const handleZoomEnd = useCallback(() => {
+    debugLog('zoomEnd');
+    setInteracting(false);
+  }, []);
   const handlePanStart = useCallback(() => setInteracting(true), []);
   const handlePanEnd = useCallback(() => setInteracting(false), []);
   const handleGestureEnd = useCallback(() => setInteracting(false), []);
+  const logPinchStart = useCallback(() => debugLog('pinchStart'), []);
+  const logPinchEnd = useCallback(() => debugLog('pinchEnd'), []);
 
   // 兜底：万一某条手势路径没有回调"结束"，最多挂起 1.5 秒就自动恢复，
   // 保证"停留 1 秒升级清晰度"不会因为一次丢事件而永久失效。
@@ -333,6 +344,10 @@ export function FootprintImagePreviewModal({
   const handleSwipe = useCallback((direction: SwipeDirection) => {
     setInteracting(false);
     if (count < 2 || (direction !== 'left' && direction !== 'right')) return;
+    // 放大状态下不翻页：`setIndex` 会把缩放/位移一起清零（表现就是"放大后被弹回原样"），
+    // 而且放大时的横向拖动本来就该是平移图片，不是翻页。
+    const zoomScale = galleryRef.current?.getState().scale ?? 1;
+    if (zoomScale > 1.02) return;
 
     const target = ((indexRef.current + (direction === 'left' ? 1 : -1)) % count + count) % count;
     indexRef.current = target;
@@ -421,6 +436,8 @@ export function FootprintImagePreviewModal({
               onSwipe={handleSwipe}
               onTap={handleTapClose}
               onVerticalPull={handleVerticalPull}
+              onPinchEnd={logPinchEnd}
+              onPinchStart={logPinchStart}
               onZoomBegin={handleZoomBegin}
               onZoomEnd={handleZoomEnd}
               ref={galleryRef}

@@ -128,7 +128,7 @@ index da2f746..d989aff 100644
        }
        const key = keyExtractor?.(item, index) ?? `item-${index}`;
 diff --git a/node_modules/react-native-zoom-toolkit/lib/module/components/gallery/GalleryGestureHandler.js b/node_modules/react-native-zoom-toolkit/lib/module/components/gallery/GalleryGestureHandler.js
-index 3bbf4a4..e12f36a 100644
+index 3bbf4a4..b21c179 100644
 --- a/node_modules/react-native-zoom-toolkit/lib/module/components/gallery/GalleryGestureHandler.js
 +++ b/node_modules/react-native-zoom-toolkit/lib/module/components/gallery/GalleryGestureHandler.js
 @@ -14,6 +14,13 @@ import { GalleryContext } from "./context.js";
@@ -238,7 +238,25 @@ index 3bbf4a4..e12f36a 100644
    useAnimatedReaction(() => ({
      translate: translate.y.value,
      isPulling: isPullingVertical.value,
-@@ -237,8 +282,12 @@ const GalleryGestureHandler = ({
+@@ -176,7 +221,16 @@ const GalleryGestureHandler = ({
+   useAnimatedReaction(() => ({
+     width: rootSize.width.value,
+     height: rootSize.height.value
+-  }), () => reset(0, 0, minScale, false), [rootSize]);
++  }), (value, previous) => {
++    // Trip patch: 只有尺寸**真的**变了（旋转 / 分屏）才重置缩放。
++    // 新架构下每次重渲染都可能再走一遍 onLayout，量出来的浮点值可能差零点几，
++    // 原来的"无条件 reset(0,0,minScale,false)"会把正在进行的捏合放大瞬间打回 1 倍 ——
++    // 表现就是"放大后直接回弹回原位"。
++    const significant = !previous || Math.abs(value.width - previous.width) > 1 || Math.abs(value.height - previous.height) > 1;
++    if (significant) {
++      reset(0, 0, minScale, false);
++    }
++  }, [rootSize]);
+   const onGestureEndWrapper = () => {
+     overflow.value = 'hidden';
+     hideAdjacentItems.value = false;
+@@ -237,8 +291,12 @@ const GalleryGestureHandler = ({
      if (onPanStart !== undefined) {
        scheduleOnRN(onPanStart, e);
      }
@@ -253,7 +271,7 @@ index 3bbf4a4..e12f36a 100644
      isScrolling.value = true;
  
      // @ts-ignore
-@@ -251,9 +300,34 @@ const GalleryGestureHandler = ({
+@@ -251,9 +309,34 @@ const GalleryGestureHandler = ({
    }).onUpdate(e => {
      if (isPullingVertical.value) {
        velocityY.value = e.velocityY;
@@ -289,7 +307,7 @@ index 3bbf4a4..e12f36a 100644
      const toX = offset.x.value + e.translationX;
      const toY = offset.y.value + e.translationY;
      const {
-@@ -273,6 +347,7 @@ const GalleryGestureHandler = ({
+@@ -273,6 +356,7 @@ const GalleryGestureHandler = ({
      const bounds = boundsFn(scale.value);
      const direction = getSwipeDirection(e, {
        boundaries: bounds,
@@ -297,7 +315,7 @@ index 3bbf4a4..e12f36a 100644
        time: time.value,
        position: {
          x: position.x.value,
-@@ -286,19 +361,15 @@ const GalleryGestureHandler = ({
+@@ -286,19 +370,15 @@ const GalleryGestureHandler = ({
      const canSwipeHorizontal = !vertical && (direction === 'left' || direction === 'right');
      const canSwipeVertical = vertical && (direction === 'up' || direction === 'down');
      if (canSwipeHorizontal || canSwipeVertical) {
@@ -322,7 +340,7 @@ index 3bbf4a4..e12f36a 100644
      const isSwipingH = direction === 'left' || direction === 'right';
      const isSwipingV = direction === 'up' || direction === 'down';
      const snapV = vertical && (direction === undefined || isSwipingH);
-@@ -307,7 +378,7 @@ const GalleryGestureHandler = ({
+@@ -307,7 +387,7 @@ const GalleryGestureHandler = ({
        scheduleOnRN(onPanEnd, e);
      }
      if (snapV || snapH) {
@@ -331,7 +349,7 @@ index 3bbf4a4..e12f36a 100644
      }
      const configX = {
        velocity: e.velocityX,
-@@ -328,6 +399,13 @@ const GalleryGestureHandler = ({
+@@ -328,6 +408,13 @@ const GalleryGestureHandler = ({
      });
      translate.x.value = withDecay(configX);
      translate.y.value = withDecay(configY);
@@ -490,7 +508,7 @@ index 2f85f6e..4e7e185 100644
          }
  
 diff --git a/node_modules/react-native-zoom-toolkit/src/components/gallery/GalleryGestureHandler.tsx b/node_modules/react-native-zoom-toolkit/src/components/gallery/GalleryGestureHandler.tsx
-index cd4b7bd..4bb1af3 100644
+index cd4b7bd..5ec55fb 100644
 --- a/node_modules/react-native-zoom-toolkit/src/components/gallery/GalleryGestureHandler.tsx
 +++ b/node_modules/react-native-zoom-toolkit/src/components/gallery/GalleryGestureHandler.tsx
 @@ -32,6 +32,13 @@ import { type GalleryProps } from './types';
@@ -611,7 +629,27 @@ index cd4b7bd..4bb1af3 100644
    useAnimatedReaction(
      () => ({
        translate: translate.y.value,
-@@ -330,8 +383,14 @@ const GalleryGestureHandler = ({
+@@ -249,7 +302,18 @@ const GalleryGestureHandler = ({
+       width: rootSize.width.value,
+       height: rootSize.height.value,
+     }),
+-    () => reset(0, 0, minScale, false),
++    (value, previous) => {
++      // Trip patch: 只有尺寸**真的**变了（旋转 / 分屏）才重置缩放。
++      // 新架构下每次重渲染都可能再走一遍 onLayout，量出来的浮点值可能差零点几，
++      // 原来的"无条件 reset"会把正在进行的捏合放大瞬间打回 1 倍（放大直接回弹）。
++      const significant =
++        !previous ||
++        Math.abs(value.width - previous.width) > 1 ||
++        Math.abs(value.height - previous.height) > 1;
++      if (significant) {
++        reset(0, 0, minScale, false);
++      }
++    },
+     [rootSize]
+   );
+ 
+@@ -330,8 +394,14 @@ const GalleryGestureHandler = ({
          scheduleOnRN(onPanStart, e);
        }
  
@@ -628,7 +666,7 @@ index cd4b7bd..4bb1af3 100644
        isScrolling.value = true;
  
        // @ts-ignore
-@@ -346,10 +405,39 @@ const GalleryGestureHandler = ({
+@@ -346,10 +416,39 @@ const GalleryGestureHandler = ({
      .onUpdate((e) => {
        if (isPullingVertical.value) {
          velocityY.value = e.velocityY;
@@ -669,7 +707,7 @@ index cd4b7bd..4bb1af3 100644
        const toX = offset.x.value + e.translationX;
        const toY = offset.y.value + e.translationY;
  
-@@ -372,6 +460,7 @@ const GalleryGestureHandler = ({
+@@ -372,6 +471,7 @@ const GalleryGestureHandler = ({
        const bounds = boundsFn(scale.value);
        const direction = getSwipeDirection(e, {
          boundaries: bounds,
@@ -677,7 +715,7 @@ index cd4b7bd..4bb1af3 100644
          time: time.value,
          position: { x: position.x.value, y: position.y.value },
          translate: {
-@@ -387,7 +476,7 @@ const GalleryGestureHandler = ({
+@@ -387,7 +487,7 @@ const GalleryGestureHandler = ({
          vertical && (direction === 'up' || direction === 'down');
  
        if (canSwipeHorizontal || canSwipeVertical) {
@@ -686,7 +724,7 @@ index cd4b7bd..4bb1af3 100644
        }
  
        if (direction !== undefined && onUserSwipe !== undefined) {
-@@ -395,12 +484,7 @@ const GalleryGestureHandler = ({
+@@ -395,12 +495,7 @@ const GalleryGestureHandler = ({
        }
  
        if (isPullingVertical.value) {
@@ -700,7 +738,7 @@ index cd4b7bd..4bb1af3 100644
          return;
        }
  
-@@ -414,7 +498,7 @@ const GalleryGestureHandler = ({
+@@ -414,7 +509,7 @@ const GalleryGestureHandler = ({
        }
  
        if (snapV || snapH) {
@@ -709,7 +747,7 @@ index cd4b7bd..4bb1af3 100644
        }
  
        const configX = { velocity: e.velocityX, clamp: [-bounds.x, bounds.x] };
-@@ -432,6 +516,14 @@ const GalleryGestureHandler = ({
+@@ -432,6 +527,14 @@ const GalleryGestureHandler = ({
  
        translate.x.value = withDecay(configX as WithDecayConfig);
        translate.y.value = withDecay(configY as WithDecayConfig);

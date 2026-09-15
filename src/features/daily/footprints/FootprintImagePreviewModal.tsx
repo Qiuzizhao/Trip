@@ -194,15 +194,26 @@ export function FootprintImagePreviewModal({
   /**
    * 横屏查看（只在预览里转屏幕，退出预览恢复竖屏）。
    *
-   * 旋转过程中照片+控件会被淡掉（contentOpacity），只留不透明的深色背板，
+   * 旋转过程中照片+控件会被淡掉（contentOpacity），整层黑掉（rotationCover），
    * 所以"重新布局 / 重新解码 / 窗口转 90°"都发生在看不见的时候。
    */
   const [landscape, setLandscape] = useState(false);
   const [rotating, setRotating] = useState(false);
   const landscapeRef = useRef(false);
   const rotatingRef = useRef(false);
-  // 旋转遮罩：1 = 正常显示，0 = 只剩背板
-  const contentOpacity = useRef(new Animated.Value(1)).current;
+  /**
+   * 旋转进度：0 = 正常显示，1 = 整层换成纯黑。
+   *
+   * iOS 26/27 的旋转动画会把 App 窗口当成一张卡片转过来，**卡片外面那一圈是系统画的纯黑**
+   * （实测系统「照片」App 也一样，App 侧画不到那块区域）。
+   * 所以我们自己在旋转期间也铺成同一种黑：卡片本身就变黑了，黑色上的黑色看不出来，
+   * 观感变成"暗一下 → 横过来了"。
+   */
+  const rotateProgress = useRef(new Animated.Value(0)).current;
+  const contentOpacity = useMemo(
+    () => rotateProgress.interpolate({ inputRange: [0, 1], outputRange: [1, 0] }),
+    [rotateProgress],
+  );
   // 调用方没带拍摄时间时，自己从本地文件读一次（只在真正看到这张图时才读）
   const [measuredTakenAt, setMeasuredTakenAt] = useState<Record<string, number | null>>({});
 
@@ -461,13 +472,13 @@ export function FootprintImagePreviewModal({
     landscapeRef.current = isLandscape;
     setLandscape(isLandscape);
     setRotating(false);
-    Animated.timing(contentOpacity, {
+    Animated.timing(rotateProgress, {
       duration: ROTATE_COVER_MS,
       easing: Easing.out(Easing.quad),
-      toValue: 1,
+      toValue: 0,
       useNativeDriver: true,
     }).start();
-  }, [contentOpacity]);
+  }, [rotateProgress]);
 
   /**
    * 横屏查看：只在预览里转动屏幕，退出预览恢复竖屏（App 本体始终竖屏）。
@@ -479,17 +490,17 @@ export function FootprintImagePreviewModal({
     landscapeRef.current = next;
     rotatingRef.current = true;
     setRotating(true);
-    Animated.timing(contentOpacity, {
+    Animated.timing(rotateProgress, {
       duration: ROTATE_COVER_MS,
       easing: Easing.out(Easing.quad),
-      toValue: 0,
+      toValue: 1,
       useNativeDriver: true,
     }).start(() => {
       void ScreenOrientation.lockAsync(
         next ? ScreenOrientation.OrientationLock.LANDSCAPE : ScreenOrientation.OrientationLock.PORTRAIT_UP,
       );
     });
-  }, [contentOpacity]);
+  }, [rotateProgress]);
 
   /**
    * 等系统真的转完再收尾。
@@ -536,9 +547,9 @@ export function FootprintImagePreviewModal({
     rotatingRef.current = false;
     setLandscape(false);
     setRotating(false);
-    contentOpacity.setValue(1);
+    rotateProgress.setValue(0);
     void ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
-  }, [contentOpacity, visible]);
+  }, [rotateProgress, visible]);
 
   useEffect(() => () => {
     void ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
@@ -683,6 +694,12 @@ export function FootprintImagePreviewModal({
               ) : null}
             </View>
           </Animated.View>
+
+          {/* 旋转黑场：和系统旋转动画铺的那层黑同色，旋转的卡片自己也是黑的，就看不见卡片了 */}
+          <Animated.View
+            pointerEvents="none"
+            style={[styles.rotationCover, { opacity: rotateProgress }]}
+          />
         </Animated.View>
       </GestureHandlerRootView>
     </Modal>
@@ -784,6 +801,14 @@ const styles = StyleSheet.create({
   // 淡入淡出层：背板 + 照片 + 控件一起升降透明度
   layer: {
     flex: 1,
+  },
+  /**
+   * 旋转黑场：纯黑 #000（和系统旋转动画的底色一致，别改成背板色，
+   * 目的就是"和系统画的那圈黑无缝接上"）。
+   */
+  rotationCover: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: '#000',
   },
   // 照片层
   content: {

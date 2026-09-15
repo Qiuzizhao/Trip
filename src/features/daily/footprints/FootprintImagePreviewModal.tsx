@@ -10,7 +10,18 @@ import { Ionicons } from '@expo/vector-icons';
 import { Image as ExpoImage, type ImageStyle } from 'expo-image';
 import * as ScreenOrientation from 'expo-screen-orientation';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Modal, Pressable, StyleSheet, Text, useWindowDimensions, View, type StyleProp } from 'react-native';
+import {
+  Alert,
+  Animated,
+  Easing,
+  Modal,
+  Pressable,
+  StyleSheet,
+  Text,
+  useWindowDimensions,
+  View,
+  type StyleProp,
+} from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Gallery, type GalleryRefType, type SwipeDirection } from 'react-native-zoom-toolkit';
@@ -26,12 +37,16 @@ import { debugLog } from './previewDebugLog';
 /** 预览里停留多久就把全分辨率那层挂上（毫秒） */
 const PREVIEW_HI_RES_DELAY_MS = 1000;
 /**
- * 下拉多少距离背景就完全淡掉（露出下面的页面）。
- * 系统「照片」就是这样：往下拖时黑色背板先化掉，只剩照片跟着手指走。
+ * 背板色：偏中性的深墨色。
+ * 和「下载」按钮已经在用的 rgba(17, 24, 39, ·) 是同一族，所以控件和背板像一个系统里的东西；
+ * 纯黑 `#000` 在黑底照片旁边会显得像"另一个 App"。
  */
-const PULL_BACKDROP_FADE_DISTANCE = 240;
-/** 顶部计数/关闭按钮/下载按钮比背景淡得更快（和系统「照片」的控件一起退场） */
-const PULL_CHROME_FADE_DISTANCE = 140;
+const PREVIEW_BACKDROP_COLOR = '#111827';
+/**
+ * 打开/关闭预览时整层淡入淡出（毫秒）。
+ * 关闭时照片、背板、控件一起溶解回列表，所以下拉关闭和点空白关闭观感完全一致。
+ */
+const PREVIEW_FADE_MS = 220;
 /** 翻页交叉淡入淡出：先淡出（毫秒） */
 const SWAP_FADE_OUT_MS = 90;
 /** 翻页交叉淡入淡出：再淡入（毫秒） */
@@ -156,6 +171,11 @@ export function FootprintImagePreviewModal({
   // 卡顿结束后积压的滑动一次性生效（表现为"卡住、然后一下跳好几张"）。
   const [interacting, setInteracting] = useState(false);
   const galleryRef = useRef<GalleryRefType>(null);
+  // 整层的淡入淡出：从列表"化"进预览，而不是啪一下切过去
+  const fadeOpacity = useRef(new Animated.Value(0)).current;
+  // 正在淡出：拦住重复的关闭请求，同时禁掉这 220ms 里的手势
+  const closingRef = useRef(false);
+  const [closing, setClosing] = useState(false);
   // 当前真实下标（回调/定时器里用 ref 读最新值，避免闭包拿到旧 state）
   const indexRef = useRef(index);
   indexRef.current = index;
@@ -218,6 +238,34 @@ export function FootprintImagePreviewModal({
   }, [index, uris, visible]);
 
   /**
+   * 打开：整层从透明淡入。
+   * 下面的列表会透出来，等于一次 220ms 的交叉溶解 —— 不再是"从浅灰首页啪一下切到黑板"。
+   */
+  useEffect(() => {
+    if (!visible) return;
+    closingRef.current = false;
+    setClosing(false);
+    fadeOpacity.setValue(0);
+    Animated.timing(fadeOpacity, {
+      duration: PREVIEW_FADE_MS,
+      easing: Easing.out(Easing.quad),
+      toValue: 1,
+      useNativeDriver: true,
+    }).start();
+  }, [fadeOpacity, visible]);
+
+  // 真正关掉之后把透明度复位（Modal 只是隐藏、组件还在），下次打开才能重新淡入
+  useEffect(() => {
+    if (visible) return;
+    closingRef.current = false;
+    setClosing(false);
+    fadeOpacity.setValue(0);
+  }, [fadeOpacity, visible]);
+
+  // 卸载时停掉动画，避免淡出回调打到已经关掉的预览上
+  useEffect(() => () => fadeOpacity.stopAnimation(), [fadeOpacity]);
+
+  /**
    * 无限循环：Gallery 是线性滚动，做不到"从头绕回尾"的滑动动画，
    * 所以数据首尾各补一张（最后一张放到最前、第一张放到最后）：
    * 滑到克隆项后再"无声"跳回真实项（内容一模一样，看不出跳），
@@ -244,22 +292,40 @@ export function FootprintImagePreviewModal({
     }
   }, [count, onIndexChange, toRealIndex, toVisualIndex]);
 
-  // 下拉关闭：极简——松手到阈值就直接关，不做任何收尾动画
-  const requestClose = useCallback(() => {
-    onClose();
-  }, [onClose]);
-
+  /**
+   * 关闭预览：整层淡出 220ms，动画走完才真正关掉。
+   * 点空白、按关闭按钮、Android 返回键、下拉松手四条路径都走这里，观感完全一致。
+   */
+  const closeWithFade = useCallback(() => {
+    if (closingRef.current) return;
+    closingRef.current = true;
+    setClosing(true);
+    Animated.timing(fadeOpacity, {
+      duration: PREVIEW_FADE_MS,
+      easing: Easing.out(Easing.quad),
+      toValue: 0,
+      useNativeDriver: true,
+    }).start(({ finished }) => {
+      if (finished) {
+        onClose();
+        return;
+      }
+      // 淡出途中被打断（比如又打开/换了一张）：放开闩锁，别让预览卡在透明状态
+      closingRef.current = false;
+      setClosing(false);
+    });
+  }, [fadeOpacity, onClose]);
 
   // 下拉超过阈值并松手时关闭（和系统「照片」一致的手感）。
   // Gallery 会在 UI 线程的 worklet 里直接调用它，所以必须由 createVerticalPullHandler 生成 worklet，
   // 不能直接传普通函数（那会闪退，见 previewGestures.ts）。
-  const handleVerticalPull = useMemo(() => createVerticalPullHandler(requestClose), [requestClose]);
+  const handleVerticalPull = useMemo(() => createVerticalPullHandler(closeWithFade), [closeWithFade]);
 
-  /** 单击关闭；刚打开的那一下抬手不算（否则打开瞬间又被关掉） */
+  /** 单击关闭（和下拉关闭同一套淡出）；刚打开的那一下抬手不算（否则打开瞬间又被关掉） */
   const handleTapClose = useCallback(() => {
     if (Date.now() - openedAtRef.current < 400) return;
-    onClose();
-  }, [onClose]);
+    closeWithFade();
+  }, [closeWithFade]);
 
   const handleRetry = useCallback(() => {
     if (!currentUri) return;
@@ -395,9 +461,9 @@ export function FootprintImagePreviewModal({
 
   return (
     <Modal
-      // 关闭自带转场：下拉离场由我们自己的动画完成，原生淡出会和它叠在一起闪一下
+      // 关闭自带转场：进出场由自己的 220ms 淡入淡出完成，原生转场会和它叠在一起闪一下
       animationType="none"
-      onRequestClose={onClose}
+      onRequestClose={closeWithFade}
       // RN 的 Modal 默认只声明竖屏，会把 App 的横屏锁定挡掉（UIKit 报
       // "Supported orientations has no common orientation"），预览要支持横屏必须在这里放开。
       supportedOrientations={['portrait', 'landscape-left', 'landscape-right']}
@@ -407,120 +473,126 @@ export function FootprintImagePreviewModal({
     >
       {/* Modal 渲染在独立的原生根视图里，手势必须自己包一层 GestureHandlerRootView */}
       <GestureHandlerRootView style={styles.root}>
-        {/* 背板：始终纯黑。下滑不再跟手/淡出，松手直接关闭预览（等同点空白） */}
-        <View pointerEvents="none" style={styles.backdrop} />
+        {/* 整层（背板 + 照片 + 控件）一起淡入淡出：关闭时是溶解回列表，不是啪一下消失 */}
+        <Animated.View
+          pointerEvents={closing ? 'none' : 'auto'}
+          style={[styles.layer, { opacity: fadeOpacity }]}
+        >
+          {/* 背板：深墨色，不再用纯黑。下拉不再跟手/淡出，松手直接关闭（等同点空白） */}
+          <View pointerEvents="none" style={styles.backdrop} />
 
-        {/* 照片层：跟手下滑由 Gallery 负责 */}
-        <View style={styles.content}>
-          {visible ? (
-            <Gallery
-              data={galleryData}
-              // 横竖屏切换后容器尺寸变了，重新挂载让它重新测量；带上当前下标避免跳回第一张
-              initialIndex={toVisualIndex(index)}
-              key={landscape ? 'landscape' : 'portrait'}
-              keyExtractor={(uri, itemIndex) => `${uri}-${itemIndex}`}
-              maxScale={6}
-              onIndexChange={handleIndexChange}
-              onGestureEnd={handleGestureEnd}
-              onPanEnd={handlePanEnd}
-              onPanStart={handlePanStart}
-              onSwipe={handleSwipe}
-              onTap={handleTapClose}
-              onVerticalPull={handleVerticalPull}
-              onPinchEnd={logPinchEnd}
-              onPinchStart={logPinchStart}
-              onZoomBegin={handleZoomBegin}
-              onZoomEnd={handleZoomEnd}
-              ref={galleryRef}
-              renderItem={(uri, itemIndex) => (
-                <PreviewItem
-                  contentFit={contentFit}
-                  hiRes={hiResUris.includes(uri)}
-                  imageStyle={imageStyle}
-                  // 首尾克隆项和真实项是同一个 uri，key 必须带上位置
-                  key={`${uri}-${itemIndex}`}
-                  onError={() => {
-                    setFailedUris((previous) => ({ ...previous, [uri]: (previous[uri] ?? 0) + 1 }));
-                  }}
-                  reloadToken={reloadToken}
-                  uri={uri}
-                  windowHeight={windowHeight}
-                  windowWidth={windowWidth}
-                />
-              )}
-              tapOnEdgeToItem={false}
-              windowSize={3}
-            />
-          ) : null}
-
-          {currentFailed ? (
-            <View pointerEvents="box-none" style={styles.errorWrap}>
-              <Ionicons name="alert-circle-outline" size={40} color="rgba(255,255,255,0.72)" />
-              <Text style={styles.errorText}>图片不可用</Text>
-              <Pressable accessibilityRole="button" onPress={handleRetry} style={styles.retryButton}>
-                <Text style={styles.retryText}>重试</Text>
-              </Pressable>
-            </View>
-          ) : null}
-        </View>
-
-        {/* 控件层 */}
-        <View pointerEvents="box-none" style={StyleSheet.absoluteFill}>
-
-          {visible && (uris.length > 1 || takenAtLabel) ? (
-            <View pointerEvents="none" style={[styles.topCenter, { top: topOffset }]}>
-              {uris.length > 1 ? (
-                <Text style={[styles.counterText, styles.chip]}>{index + 1} / {uris.length}</Text>
-              ) : null}
-              {takenAtLabel ? <Text style={styles.takenAtText}>{takenAtLabel}</Text> : null}
-            </View>
-          ) : null}
-
-          <Pressable
-            accessibilityLabel={landscape ? '竖屏查看' : '横屏查看'}
-            accessibilityRole="button"
-            onPress={toggleLandscape}
-            style={[styles.closeButton, { right: spacing.lg + 44, top: topOffset }]}
-          >
-            <Ionicons
-              color="#fff"
-              name={landscape ? 'phone-portrait-outline' : 'phone-landscape-outline'}
-              size={20}
-            />
-          </Pressable>
-
-          <Pressable
-            accessibilityLabel="关闭图片预览"
-            accessibilityRole="button"
-            onPress={onClose}
-            style={[styles.closeButton, { top: topOffset }]}
-          >
-            <Ionicons name="close" size={26} color="#fff" />
-          </Pressable>
-
-          {visible && (showDownload || action) ? (
-            <View pointerEvents="box-none" style={[styles.actionWrap, { bottom: bottomOffset }]}>
-              <View style={styles.actionRow}>
-                {showDownload ? (
-                  <Pressable
-                    accessibilityLabel={downloading ? '正在下载图片' : '下载图片'}
-                    accessibilityRole="button"
-                    disabled={downloading}
-                    onPress={(event) => {
-                      event.stopPropagation();
-                      void handleDownload();
+          {/* 照片层：左右翻页/缩放由 Gallery 负责，纵向下拉不跟手 */}
+          <View style={styles.content}>
+            {visible ? (
+              <Gallery
+                data={galleryData}
+                // 横竖屏切换后容器尺寸变了，重新挂载让它重新测量；带上当前下标避免跳回第一张
+                initialIndex={toVisualIndex(index)}
+                key={landscape ? 'landscape' : 'portrait'}
+                keyExtractor={(uri, itemIndex) => `${uri}-${itemIndex}`}
+                maxScale={6}
+                onIndexChange={handleIndexChange}
+                onGestureEnd={handleGestureEnd}
+                onPanEnd={handlePanEnd}
+                onPanStart={handlePanStart}
+                onSwipe={handleSwipe}
+                onTap={handleTapClose}
+                onVerticalPull={handleVerticalPull}
+                onPinchEnd={logPinchEnd}
+                onPinchStart={logPinchStart}
+                onZoomBegin={handleZoomBegin}
+                onZoomEnd={handleZoomEnd}
+                ref={galleryRef}
+                renderItem={(uri, itemIndex) => (
+                  <PreviewItem
+                    contentFit={contentFit}
+                    hiRes={hiResUris.includes(uri)}
+                    imageStyle={imageStyle}
+                    // 首尾克隆项和真实项是同一个 uri，key 必须带上位置
+                    key={`${uri}-${itemIndex}`}
+                    onError={() => {
+                      setFailedUris((previous) => ({ ...previous, [uri]: (previous[uri] ?? 0) + 1 }));
                     }}
-                    style={[styles.downloadButton, downloading && styles.downloadButtonDisabled]}
-                  >
-                    <Ionicons name="download-outline" size={18} color="#fff" />
-                    <Text style={styles.downloadButtonText}>{downloading ? '下载中' : '下载'}</Text>
-                  </Pressable>
-                ) : null}
-                {action}
+                    reloadToken={reloadToken}
+                    uri={uri}
+                    windowHeight={windowHeight}
+                    windowWidth={windowWidth}
+                  />
+                )}
+                tapOnEdgeToItem={false}
+                windowSize={3}
+              />
+            ) : null}
+
+            {currentFailed ? (
+              <View pointerEvents="box-none" style={styles.errorWrap}>
+                <Ionicons name="alert-circle-outline" size={40} color="rgba(255,255,255,0.72)" />
+                <Text style={styles.errorText}>图片不可用</Text>
+                <Pressable accessibilityRole="button" onPress={handleRetry} style={styles.retryButton}>
+                  <Text style={styles.retryText}>重试</Text>
+                </Pressable>
               </View>
-            </View>
-          ) : null}
-        </View>
+            ) : null}
+          </View>
+
+          {/* 控件层 */}
+          <View pointerEvents="box-none" style={StyleSheet.absoluteFill}>
+
+            {visible && (uris.length > 1 || takenAtLabel) ? (
+              <View pointerEvents="none" style={[styles.topCenter, { top: topOffset }]}>
+                {uris.length > 1 ? (
+                  <Text style={[styles.counterText, styles.chip]}>{index + 1} / {uris.length}</Text>
+                ) : null}
+                {takenAtLabel ? <Text style={styles.takenAtText}>{takenAtLabel}</Text> : null}
+              </View>
+            ) : null}
+
+            <Pressable
+              accessibilityLabel={landscape ? '竖屏查看' : '横屏查看'}
+              accessibilityRole="button"
+              onPress={toggleLandscape}
+              style={[styles.closeButton, { right: spacing.lg + 44, top: topOffset }]}
+            >
+              <Ionicons
+                color="#fff"
+                name={landscape ? 'phone-portrait-outline' : 'phone-landscape-outline'}
+                size={20}
+              />
+            </Pressable>
+
+            <Pressable
+              accessibilityLabel="关闭图片预览"
+              accessibilityRole="button"
+              onPress={closeWithFade}
+              style={[styles.closeButton, { top: topOffset }]}
+            >
+              <Ionicons name="close" size={26} color="#fff" />
+            </Pressable>
+
+            {visible && (showDownload || action) ? (
+              <View pointerEvents="box-none" style={[styles.actionWrap, { bottom: bottomOffset }]}>
+                <View style={styles.actionRow}>
+                  {showDownload ? (
+                    <Pressable
+                      accessibilityLabel={downloading ? '正在下载图片' : '下载图片'}
+                      accessibilityRole="button"
+                      disabled={downloading}
+                      onPress={(event) => {
+                        event.stopPropagation();
+                        void handleDownload();
+                      }}
+                      style={[styles.downloadButton, downloading && styles.downloadButtonDisabled]}
+                    >
+                      <Ionicons name="download-outline" size={18} color="#fff" />
+                      <Text style={styles.downloadButtonText}>{downloading ? '下载中' : '下载'}</Text>
+                    </Pressable>
+                  ) : null}
+                  {action}
+                </View>
+              </View>
+            ) : null}
+          </View>
+        </Animated.View>
       </GestureHandlerRootView>
     </Modal>
   );
@@ -613,10 +685,14 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: '42%',
   },
-  // 背板：整屏纯黑
+  // 背板：整屏深墨色（和下载按钮同族），不再是纯黑
   backdrop: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: '#000',
+    backgroundColor: PREVIEW_BACKDROP_COLOR,
+  },
+  // 淡入淡出层：背板 + 照片 + 控件一起升降透明度
+  layer: {
+    flex: 1,
   },
   // 照片层
   content: {

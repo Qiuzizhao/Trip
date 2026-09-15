@@ -123,17 +123,29 @@ const snapDuration = clamp(snapDistance / Math.max(Math.abs(velocity), 300) * 10
 
 调用处把 `e.velocityX` 传进 `onSwipe` 与 `snapToScrollPosition`（TS 源码与 `lib/module` 编译产物同时改）。
 
-**下拉关闭（2026-09-14 重做）**：以前是"整个预览层一起变淡 + 缩小"，看起来像一张黑纸慢慢化掉，
-用户反馈"既然下滑了，黑背景就该消失，只留照片在动"。现在拆成三层（`FootprintImagePreviewModal`）：
+**下拉关闭（2026-09-15 二版：完全等同于点空白）**：
 
-- **黑色背板单独一层**：`pull`（下拉位移）驱动它淡到全透明（240pt 内淡完），露出下面的列表；
-- **照片层**：跟手下滑由 Gallery 负责，这一层只叠加"松手甩出去"的那一段位移（`exitOffset`，120pt / 170ms）；
-- **控件层**（计数 / 拍摄时间 / 关闭 / 横屏 / 下载）：140pt 内先淡出。
+- 下拉过程中**照片不动、背板不变、控件不淡**——库里 `onUpdate` 只把位移记进
+  `pullDistance`（不再写 `translate.y`），所以拖的时候画面是静止的；
+- 松手超过阈值（`VERTICAL_PULL_CLOSE_THRESHOLD = 50`）→ 直接关闭；
+  没到阈值 → 什么都不发生（照片本来就没动，也没有回弹动画）；
+- 关闭动作和点击空白、点关闭按钮、Android 返回键**共用同一条路径** `closeWithFade`
+  （见下节），四条路径观感完全一致。
 
-松手超过阈值（80pt）：背板继续淡到底 + 照片顺势再走一段（170ms）后关闭；
-没到阈值：220ms 顺滑回位。
-`pull` 与 `exitOffset` **每次打开预览都清零**（共享值活在组件上，Modal 关闭不会卸载它），
-否则下次打开会出现"半透明"或"照片停在偏下位置"。
+历史版本（已废弃）：2026-09-14 曾做过"背板跟随下拉淡出 + 照片跟手位移 + 控件先淡出 +
+松手甩出"的三层跟手动画；因为下拉和点空白两种关闭方式观感不一致，2026-09-15 全部拆掉了。
+
+## 背板颜色与进出场动画（2026-09-15）
+
+- **背板不再是纯黑**，改成 `PREVIEW_BACKDROP_COLOR = '#111827'`（偏中性的深墨色）。
+  它和「下载」按钮已经在用的 `rgba(17, 24, 39, ·)` 是同一族，背板和控件看起来属于同一个系统，
+  不再像"另一个全黑的 App"。
+- **打开/关闭都是整层 220ms 淡入淡出**（`PREVIEW_FADE_MS`，`Animated` + `useNativeDriver`）：
+  背板、照片、控件作为一层一起升降透明度，所以进场是从列表"交叉溶解"进预览，
+  出场是溶解回列表，而不是啪一下切黑。
+- 因为要放完淡出才真正关闭，`onClose()` 被推迟了 220ms：`closeWithFade` 播完动画才回调它；
+  这 220ms 里 `pointerEvents="none"` 挡住手势，`closingRef` 拦住重复的关闭请求。
+  淡出被打断（例如又打开了预览）会把闩锁放开并复位透明度，不会卡在透明状态。
 
 ## 三个「卡住 / 半透明」的坑（2026-09-14 修复）
 
@@ -152,8 +164,12 @@ const snapDuration = clamp(snapDistance / Math.max(Math.abs(velocity), 300) * 10
 3. **下拉到一半卡住、图片半透明、底下列表透出来**：关不关以前挂在 `withTiming` 的
    `finished` 回调上。动画一旦被打断（新手势写 `pull`、GestureHandler 被取消），
    回调带 `finished = false` 回来，`onClose` 就永远不会触发，预览永久停在下拉一半。
-   现在 UI 线程只负责动画，**关闭由 JS 侧按同样时长兜底**（`requestClose` →
-   `setTimeout(onClose, 170)`），动画被打断也一定会关掉。
+现在 UI 线程只负责动画，**关闭由 JS 侧按同样时长兜底**（`requestClose` →
+`setTimeout(onClose, 170)`），动画被打断也一定会关掉。
+
+> 以上三条是 2026-09-14 的状态。2026-09-15 改成"下拉不跟手"之后，第 2、3 条里的
+> `pull` 共享值与"170ms 兜底关闭"都已不存在：现在下拉只记录 `pullDistance`，
+> 关闭统一走 `closeWithFade` 的 220ms 淡出（含 `closingRef` 闩锁 + 透明度复位）。
 
 配套的库补丁（`react-native-zoom-toolkit+5.1.1.patch`）还有两处收尾：
 
@@ -271,7 +287,9 @@ xcodebuild test -project TripUIAutomation.xcodeproj -scheme TripUITests \
 ## 后续可调项
 
 - 最大放大倍数：`maxScale={6}`；
-- 下拉关闭阈值：`handleVerticalPull` 里的 `translateY > 80`；
+- 下拉关闭阈值：`previewGestures.ts` 的 `VERTICAL_PULL_CLOSE_THRESHOLD`（当前 50pt）；
+- 进出场淡入淡出时长：`FootprintImagePreviewModal.tsx` 的 `PREVIEW_FADE_MS`（当前 220ms）；
+- 背板颜色：`FootprintImagePreviewModal.tsx` 的 `PREVIEW_BACKDROP_COLOR`（当前 `#111827`）；
 - 单击关闭 vs 「单击隐藏/显示控件」：目前是单击关闭（延续旧行为），若要更像系统「照片」可改为切换工具栏显隐。
 
 ## 相关文档

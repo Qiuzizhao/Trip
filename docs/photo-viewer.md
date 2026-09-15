@@ -231,11 +231,39 @@ xcodebuild test -project TripUIAutomation.xcodeproj -scheme TripUITests \
    表现为「按钮状态变了但屏幕不转」。要显式写
    `supportedOrientations={['portrait', 'landscape-left', 'landscape-right']}`。
 4. 用 `expo-screen-orientation` 的 `OrientationLock.LANDSCAPE`（左右横屏都允许），
-   横竖屏切换后 `useWindowDimensions()` 会变，`Gallery` 用 `key` 重新挂载以重新测量，
-   同时传当前下标避免跳回第一张。
+   横竖屏切换后 `useWindowDimensions()` 变，`Gallery` **保持挂载**（不再用 `key` 重挂载，
+   见下节）。
 
-验证（模拟器实测日志）：点按钮 `(Pu) -> (Ll Lr)`、截图从 1206×2622 变 2622×1206；
-关闭预览 `(Ll Lr) -> (Pu)` 回到竖屏。
+### 旋转不再闪白 / 变形（2026-09-15 重做）
+
+之前的做法是"点按钮 → 乐观地先翻 `landscape` 状态 → 同时锁方向 → 用 `key` 把 Gallery
+整体重挂载"。结果旋转时各种闪烁、变形、闪白，三个来源：
+
+1. **闪白**：预览的 `Modal` 是 `transparent`，背后是浅色列表；旋转时窗口被重新尺寸化，
+   露出来的那一圈是根视图底色（默认白）。
+2. **重挂载**：`key` 一变，所有 `PreviewItem` 一起卸载重挂 —— 里面有"必须先量到尺寸才挂图"
+   的闸门（`measured`），于是出现空帧、重新解码，全分辨率层还带着 `transition={120}` 淡入。
+3. **变形**：JS 状态先按横屏尺寸布局，而窗口可能还在转的半路上，两个坐标系更新时间错开。
+
+现在改成：
+
+- **去掉 `key` 重挂载**。库本来就会正确处理尺寸变化：`GalleryItem.measureChild` 会在子视图
+  重新布局时更新 `rootChildSize`，补丁版 `measureRoot` 也只在尺寸真的变了时才写 `rootSize`
+  （并顺带 `reset(0, 0, minScale)`）。旋转后缩放回到 1 倍是预期行为。
+- **状态跟着真实方向走**：点按钮只负责"淡掉内容 + 锁方向"，
+  `landscape` 由 `ScreenOrientation.addOrientationChangeListener` 的回调来设置，
+  JS 不会在窗口还没转完时就按新尺寸布局；另有 `ROTATE_FALLBACK_MS`（700ms）兜底。
+- **旋转遮罩**：照片+控件那层（`contentOpacity`）在 `ROTATE_COVER_MS`（150ms）内淡到 0，
+  只剩不透明的深色背板；等方向变化事件到了再淡回来。重布局、重解码、窗口转 90° 全部
+  发生在这段看不见的时间里。
+- **根视图底色**：预览可见期间用 `expo-system-ui` 把根视图底色也设成背板色
+  （关闭时恢复 `colors.bg`）。旋转时窗口重新尺寸化露出的那一圈因此是深色而不是白色 ——
+  "闪白"就是这么消掉的。因为改的是根视图而不是预览层，开关预览的交叉溶解不受影响。
+
+验证（模拟器 iPhone 18 Pro / iOS 27，Release 包）：点旋转 → 连续截图，
+过渡帧是纯黑的系统旋转帧（四角 `#000`），前后两帧四角都是 `#111827`，
+全程没有出现浅色/白色像素；横屏渲染正常（计数 1/2、拍摄时间、下载按钮都在位）；
+再点一次转回竖屏同样干净；横屏状态下直接关闭预览，能正确回到竖屏列表。
 
 ## 实现方式
 

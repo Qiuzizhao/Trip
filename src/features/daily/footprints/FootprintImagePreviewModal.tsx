@@ -163,6 +163,27 @@ export function FootprintImagePreviewModal({
   onIndexChangeRef.current = onIndexChange;
   // 正在下拉：去掉黑色背板（只留照片跟着手指往下走）
   const [pulling, setPulling] = useState(false);
+  const pullRestoreTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /**
+   * 黑板只在两种时候出现：没在拖、也没在回弹。
+   * 注意「没到阈值松手」这条路径：库要用约 300ms 把照片弹回原位，
+   * 如果这时立刻把黑板拍回来，就会出现"照片还在动、黑板先闪一下"。
+   * 所以往下拖立刻去掉黑板，恢复则等回弹动画走完。
+   */
+  const handlePullingChange = useCallback((nextPulling: boolean) => {
+    if (pullRestoreTimer.current) {
+      clearTimeout(pullRestoreTimer.current);
+      pullRestoreTimer.current = null;
+    }
+    if (nextPulling) {
+      setPulling(true);
+      return;
+    }
+    pullRestoreTimer.current = setTimeout(() => {
+      pullRestoreTimer.current = null;
+      setPulling(false);
+    }, 320);
+  }, []);
   // 打开预览的时刻：用来过滤"打开那一下的抬手被 Gallery 当成单击"（会立刻把预览关掉）
   const openedAtRef = useRef(0);
   // 横屏查看：只在预览里把屏幕转过来，退出预览恢复竖屏
@@ -260,8 +281,8 @@ export function FootprintImagePreviewModal({
   // Gallery 会在 UI 线程的 worklet 里直接调用它，所以必须由 createVerticalPullHandler 生成 worklet，
   // 不能直接传普通函数（那会闪退，见 previewGestures.ts）。
   const handleVerticalPull = useMemo(
-    () => createVerticalPullHandler(requestClose, setPulling),
-    [requestClose],
+    () => createVerticalPullHandler(requestClose, handlePullingChange),
+    [handlePullingChange, requestClose],
   );
 
   /** 单击关闭；刚打开的那一下抬手不算（否则打开瞬间又被关掉） */

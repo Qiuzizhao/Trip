@@ -128,7 +128,7 @@ index da2f746..d989aff 100644
        }
        const key = keyExtractor?.(item, index) ?? `item-${index}`;
 diff --git a/node_modules/react-native-zoom-toolkit/lib/module/components/gallery/GalleryGestureHandler.js b/node_modules/react-native-zoom-toolkit/lib/module/components/gallery/GalleryGestureHandler.js
-index 3bbf4a4..b21c179 100644
+index 3bbf4a4..e1779c3 100644
 --- a/node_modules/react-native-zoom-toolkit/lib/module/components/gallery/GalleryGestureHandler.js
 +++ b/node_modules/react-native-zoom-toolkit/lib/module/components/gallery/GalleryGestureHandler.js
 @@ -14,6 +14,13 @@ import { GalleryContext } from "./context.js";
@@ -145,17 +145,19 @@ index 3bbf4a4..b21c179 100644
  /*
   * Pinchable views are really heavy components, therefore in order to maximize performance
   * only a single pinchable view is shared among all the list items, items listen to this
-@@ -66,6 +73,9 @@ const GalleryGestureHandler = ({
+@@ -66,6 +73,11 @@ const GalleryGestureHandler = ({
    const gestureEnd = useSharedValue(0);
    const isPullingVertical = useSharedValue(false);
    const pullReleased = useSharedValue(false);
++  // Trip patch: 下拉不再让照片跟手，只记录"拖了多远"；松手超过阈值由使用方直接关闭预览。
++  const pullDistance = useSharedValue(0);
 +  // Trip patch: 本次手势锁到哪个轴（未知 / 横向 / 纵向），以及下拉是否已经收尾过一次
 +  const panAxis = useSharedValue(PAN_AXIS_UNKNOWN);
 +  const pullHandled = useSharedValue(false);
    const horizontalScrollDirection = rtl ? -1 : 1;
    const boundsFn = optionalScale => {
      'worklet';
-@@ -100,7 +110,7 @@ const GalleryGestureHandler = ({
+@@ -100,7 +112,7 @@ const GalleryGestureHandler = ({
  
    // This funcions controls the snapping of the gallery's items when panning
    // For instance if you slowly pan and let go the item
@@ -164,7 +166,7 @@ index 3bbf4a4..b21c179 100644
      'worklet';
  
      cancelAnimation(scroll);
-@@ -120,9 +130,14 @@ const GalleryGestureHandler = ({
+@@ -120,9 +132,14 @@ const GalleryGestureHandler = ({
        gap
      });
  
@@ -181,7 +183,7 @@ index 3bbf4a4..b21c179 100644
        if (!finished) return;
        if (toScroll !== current) {
          activeIndex.value += toScroll === next ? 1 : -1;
-@@ -131,9 +146,14 @@ const GalleryGestureHandler = ({
+@@ -131,9 +148,14 @@ const GalleryGestureHandler = ({
        toScroll !== current && reset(0, 0, minScale, false);
      });
    };
@@ -197,7 +199,7 @@ index 3bbf4a4..b21c179 100644
      cancelAnimation(scroll);
      let toIndex = activeIndex.value;
      if (swipeDirection === 'up' && vertical) toIndex += 1;
-@@ -152,7 +172,13 @@ const GalleryGestureHandler = ({
+@@ -152,7 +174,13 @@ const GalleryGestureHandler = ({
        itemSize: itemSize.value,
        gap
      });
@@ -212,7 +214,7 @@ index 3bbf4a4..b21c179 100644
        if (!finished) {
          return;
        }
-@@ -161,6 +187,25 @@ const GalleryGestureHandler = ({
+@@ -161,8 +189,25 @@ const GalleryGestureHandler = ({
        reset(0, 0, minScale, false);
      });
    };
@@ -222,23 +224,29 @@ index 3bbf4a4..b21c179 100644
 +  const releasePull = () => {
 +    'worklet';
 +    pullHandled.value = true;
-+    // 先置 released：下面的 reaction 只在 isPullingVertical 为真时回调 onVerticalPull，
-+    // 所以这里不能顺手把 isPullingVertical 置回 false，否则"松手关闭"整个丢失。
 +    pullReleased.value = true;
 +
-+    // 超过阈值：保持位移不弹回，交给使用方（previewGestures）把收起动画走完再关闭
-+    if (translate.y.value > VERTICAL_PULL_KEEP_THRESHOLD) {
++    // 超过阈值：交给使用方（previewGestures）直接关闭预览 —— 没有跟手动画、没有黑板过渡
++    if (pullDistance.value > VERTICAL_PULL_KEEP_THRESHOLD) {
 +      return;
 +    }
-+    translate.y.value = withTiming(0, undefined, finished => {
-+      isPullingVertical.value = !finished;
-+      pullReleased.value = !finished;
-+    });
++    // 没到阈值：照片本来就没动，把状态清干净即可
++    pullDistance.value = 0;
++    isPullingVertical.value = false;
++    pullReleased.value = false;
 +  };
    useAnimatedReaction(() => ({
-     translate: translate.y.value,
+-    translate: translate.y.value,
++    translate: pullDistance.value,
      isPulling: isPullingVertical.value,
-@@ -176,7 +221,16 @@ const GalleryGestureHandler = ({
+     released: pullReleased.value,
+     velocityY: velocityY.value
+@@ -172,11 +217,20 @@ const GalleryGestureHandler = ({
+       released: val.released,
+       velocityY: val.velocityY
+     });
+-  }, [translate, isPullingVertical, pullReleased, velocityY]);
++  }, [pullDistance, isPullingVertical, pullReleased, velocityY]);
    useAnimatedReaction(() => ({
      width: rootSize.width.value,
      height: rootSize.height.value
@@ -256,7 +264,7 @@ index 3bbf4a4..b21c179 100644
    const onGestureEndWrapper = () => {
      overflow.value = 'hidden';
      hideAdjacentItems.value = false;
-@@ -237,8 +291,12 @@ const GalleryGestureHandler = ({
+@@ -237,8 +291,13 @@ const GalleryGestureHandler = ({
      if (onPanStart !== undefined) {
        scheduleOnRN(onPanStart, e);
      }
@@ -268,16 +276,17 @@ index 3bbf4a4..b21c179 100644
 +    pullHandled.value = false;
 +    pullReleased.value = false;
 +    isPullingVertical.value = false;
++    pullDistance.value = 0;
      isScrolling.value = true;
  
      // @ts-ignore
-@@ -251,9 +309,34 @@ const GalleryGestureHandler = ({
+@@ -251,9 +310,34 @@ const GalleryGestureHandler = ({
    }).onUpdate(e => {
      if (isPullingVertical.value) {
        velocityY.value = e.velocityY;
 -      translate.y.value = e.translationY;
-+      // Trip patch: 只跟手向下（向上没有内容可露出来）
-+      translate.y.value = Math.max(0, e.translationY);
++      // Trip patch: 照片不动，只记下拉距离（松手直接关闭，不做跟手/回弹动画）
++      pullDistance.value = Math.max(0, e.translationY);
        return;
      }
 +    // Trip patch: 锁轴 —— 纵向先到 12px 才承认是下拉，横向则走原来的滑动路径
@@ -290,7 +299,7 @@ index 3bbf4a4..b21c179 100644
 +          if (!vertical && scale.value === 1 && e.translationY > 0) {
 +            isPullingVertical.value = true;
 +            velocityY.value = e.velocityY;
-+            translate.y.value = e.translationY;
++            pullDistance.value = Math.max(0, e.translationY);
 +            // 锁轴前那一两像素的横向位移可能已经把 scroll 推偏了，回到当前页
 +            scroll.value = getScrollPosition({
 +              index: activeIndex.value,
@@ -307,7 +316,7 @@ index 3bbf4a4..b21c179 100644
      const toX = offset.x.value + e.translationX;
      const toY = offset.y.value + e.translationY;
      const {
-@@ -273,6 +356,7 @@ const GalleryGestureHandler = ({
+@@ -273,6 +357,7 @@ const GalleryGestureHandler = ({
      const bounds = boundsFn(scale.value);
      const direction = getSwipeDirection(e, {
        boundaries: bounds,
@@ -315,7 +324,7 @@ index 3bbf4a4..b21c179 100644
        time: time.value,
        position: {
          x: position.x.value,
-@@ -286,19 +370,15 @@ const GalleryGestureHandler = ({
+@@ -286,19 +371,15 @@ const GalleryGestureHandler = ({
      const canSwipeHorizontal = !vertical && (direction === 'left' || direction === 'right');
      const canSwipeVertical = vertical && (direction === 'up' || direction === 'down');
      if (canSwipeHorizontal || canSwipeVertical) {
@@ -340,7 +349,7 @@ index 3bbf4a4..b21c179 100644
      const isSwipingH = direction === 'left' || direction === 'right';
      const isSwipingV = direction === 'up' || direction === 'down';
      const snapV = vertical && (direction === undefined || isSwipingH);
-@@ -307,7 +387,7 @@ const GalleryGestureHandler = ({
+@@ -307,7 +388,7 @@ const GalleryGestureHandler = ({
        scheduleOnRN(onPanEnd, e);
      }
      if (snapV || snapH) {
@@ -349,7 +358,7 @@ index 3bbf4a4..b21c179 100644
      }
      const configX = {
        velocity: e.velocityX,
-@@ -328,6 +408,13 @@ const GalleryGestureHandler = ({
+@@ -328,6 +409,13 @@ const GalleryGestureHandler = ({
      });
      translate.x.value = withDecay(configX);
      translate.y.value = withDecay(configY);
@@ -508,7 +517,7 @@ index 2f85f6e..4e7e185 100644
          }
  
 diff --git a/node_modules/react-native-zoom-toolkit/src/components/gallery/GalleryGestureHandler.tsx b/node_modules/react-native-zoom-toolkit/src/components/gallery/GalleryGestureHandler.tsx
-index cd4b7bd..5ec55fb 100644
+index cd4b7bd..8864063 100644
 --- a/node_modules/react-native-zoom-toolkit/src/components/gallery/GalleryGestureHandler.tsx
 +++ b/node_modules/react-native-zoom-toolkit/src/components/gallery/GalleryGestureHandler.tsx
 @@ -32,6 +32,13 @@ import { type GalleryProps } from './types';
@@ -525,17 +534,19 @@ index cd4b7bd..5ec55fb 100644
  
  type GalleryGestureHandlerProps = {
    length: number;
-@@ -115,6 +122,9 @@ const GalleryGestureHandler = ({
+@@ -115,6 +122,11 @@ const GalleryGestureHandler = ({
    const gestureEnd = useSharedValue<number>(0);
    const isPullingVertical = useSharedValue<boolean>(false);
    const pullReleased = useSharedValue<boolean>(false);
++  // Trip patch: 下拉不再让照片跟手，只记录"拖了多远"；松手超过阈值由使用方直接关闭预览。
++  const pullDistance = useSharedValue<number>(0);
 +  // Trip patch: 本次手势锁到哪个轴（未知 / 横向 / 纵向），以及下拉是否已经收尾过一次
 +  const panAxis = useSharedValue<number>(PAN_AXIS_UNKNOWN);
 +  const pullHandled = useSharedValue<boolean>(false);
  
    const horizontalScrollDirection = rtl ? -1 : 1;
  
-@@ -149,7 +159,7 @@ const GalleryGestureHandler = ({
+@@ -149,7 +161,7 @@ const GalleryGestureHandler = ({
  
    // This funcions controls the snapping of the gallery's items when panning
    // For instance if you slowly pan and let go the item
@@ -544,7 +555,7 @@ index cd4b7bd..5ec55fb 100644
      'worklet';
  
      cancelAnimation(scroll);
-@@ -170,10 +180,20 @@ const GalleryGestureHandler = ({
+@@ -170,10 +182,20 @@ const GalleryGestureHandler = ({
        gap,
      });
  
@@ -567,7 +578,7 @@ index cd4b7bd..5ec55fb 100644
        if (!finished) return;
        if (toScroll !== current) {
          activeIndex.value += toScroll === next ? 1 : -1;
-@@ -184,9 +204,14 @@ const GalleryGestureHandler = ({
+@@ -184,9 +206,14 @@ const GalleryGestureHandler = ({
      });
    };
  
@@ -583,7 +594,7 @@ index cd4b7bd..5ec55fb 100644
      cancelAnimation(scroll);
  
      let toIndex = activeIndex.value;
-@@ -211,9 +236,17 @@ const GalleryGestureHandler = ({
+@@ -211,9 +238,17 @@ const GalleryGestureHandler = ({
        gap,
      });
  
@@ -602,7 +613,7 @@ index cd4b7bd..5ec55fb 100644
        (finished) => {
          if (!finished) {
            return;
-@@ -226,6 +259,26 @@ const GalleryGestureHandler = ({
+@@ -226,9 +261,27 @@ const GalleryGestureHandler = ({
      );
    };
  
@@ -611,24 +622,35 @@ index cd4b7bd..5ec55fb 100644
 +  const releasePull = () => {
 +    'worklet';
 +    pullHandled.value = true;
-+    // 先置 released：下面的 reaction 只在 isPullingVertical 为真时回调 onVerticalPull，
-+    // 所以这里不能顺手把 isPullingVertical 置回 false，否则"松手关闭"整个丢失。
 +    pullReleased.value = true;
 +
-+    // 超过阈值：保持位移不弹回，交给使用方（previewGestures）把收起动画走完再关闭
-+    if (translate.y.value > VERTICAL_PULL_KEEP_THRESHOLD) {
++    // 超过阈值：交给使用方（previewGestures）直接关闭预览 —— 没有跟手动画、没有黑板过渡
++    if (pullDistance.value > VERTICAL_PULL_KEEP_THRESHOLD) {
 +      return;
 +    }
 +
-+    translate.y.value = withTiming(0, undefined, (finished) => {
-+      isPullingVertical.value = !finished;
-+      pullReleased.value = !finished;
-+    });
++    // 没到阈值：照片本来就没动，把状态清干净即可
++    pullDistance.value = 0;
++    isPullingVertical.value = false;
++    pullReleased.value = false;
 +  };
 +
    useAnimatedReaction(
      () => ({
-       translate: translate.y.value,
+-      translate: translate.y.value,
++      translate: pullDistance.value,
+       isPulling: isPullingVertical.value,
+       released: pullReleased.value,
+       velocityY: velocityY.value,
+@@ -241,7 +294,7 @@ const GalleryGestureHandler = ({
+           velocityY: val.velocityY,
+         });
+     },
+-    [translate, isPullingVertical, pullReleased, velocityY]
++    [pullDistance, isPullingVertical, pullReleased, velocityY]
+   );
+ 
+   useAnimatedReaction(
 @@ -249,7 +302,18 @@ const GalleryGestureHandler = ({
        width: rootSize.width.value,
        height: rootSize.height.value,
@@ -649,7 +671,7 @@ index cd4b7bd..5ec55fb 100644
      [rootSize]
    );
  
-@@ -330,8 +394,14 @@ const GalleryGestureHandler = ({
+@@ -330,8 +394,15 @@ const GalleryGestureHandler = ({
          scheduleOnRN(onPanStart, e);
        }
  
@@ -663,16 +685,17 @@ index cd4b7bd..5ec55fb 100644
 +      pullHandled.value = false;
 +      pullReleased.value = false;
 +      isPullingVertical.value = false;
++      pullDistance.value = 0;
        isScrolling.value = true;
  
        // @ts-ignore
-@@ -346,10 +416,39 @@ const GalleryGestureHandler = ({
+@@ -346,10 +417,39 @@ const GalleryGestureHandler = ({
      .onUpdate((e) => {
        if (isPullingVertical.value) {
          velocityY.value = e.velocityY;
 -        translate.y.value = e.translationY;
 +        // Trip patch: 只跟手向下（向上没有内容可露出来）
-+        translate.y.value = Math.max(0, e.translationY);
++        pullDistance.value = Math.max(0, e.translationY);
          return;
        }
  
@@ -688,7 +711,7 @@ index cd4b7bd..5ec55fb 100644
 +            if (!vertical && scale.value === 1 && e.translationY > 0) {
 +              isPullingVertical.value = true;
 +              velocityY.value = e.velocityY;
-+              translate.y.value = e.translationY;
++              pullDistance.value = Math.max(0, e.translationY);
 +              // 锁轴前那一两像素的横向位移可能已经把 scroll 推偏了，回到当前页，
 +              // 免得下拉结束后图片留在偏一点点、边上露出黑边的状态
 +              scroll.value = getScrollPosition({
@@ -707,7 +730,7 @@ index cd4b7bd..5ec55fb 100644
        const toX = offset.x.value + e.translationX;
        const toY = offset.y.value + e.translationY;
  
-@@ -372,6 +471,7 @@ const GalleryGestureHandler = ({
+@@ -372,6 +472,7 @@ const GalleryGestureHandler = ({
        const bounds = boundsFn(scale.value);
        const direction = getSwipeDirection(e, {
          boundaries: bounds,
@@ -715,7 +738,7 @@ index cd4b7bd..5ec55fb 100644
          time: time.value,
          position: { x: position.x.value, y: position.y.value },
          translate: {
-@@ -387,7 +487,7 @@ const GalleryGestureHandler = ({
+@@ -387,7 +488,7 @@ const GalleryGestureHandler = ({
          vertical && (direction === 'up' || direction === 'down');
  
        if (canSwipeHorizontal || canSwipeVertical) {
@@ -724,7 +747,7 @@ index cd4b7bd..5ec55fb 100644
        }
  
        if (direction !== undefined && onUserSwipe !== undefined) {
-@@ -395,12 +495,7 @@ const GalleryGestureHandler = ({
+@@ -395,12 +496,7 @@ const GalleryGestureHandler = ({
        }
  
        if (isPullingVertical.value) {
@@ -738,7 +761,7 @@ index cd4b7bd..5ec55fb 100644
          return;
        }
  
-@@ -414,7 +509,7 @@ const GalleryGestureHandler = ({
+@@ -414,7 +510,7 @@ const GalleryGestureHandler = ({
        }
  
        if (snapV || snapH) {
@@ -747,7 +770,7 @@ index cd4b7bd..5ec55fb 100644
        }
  
        const configX = { velocity: e.velocityX, clamp: [-bounds.x, bounds.x] };
-@@ -432,6 +527,14 @@ const GalleryGestureHandler = ({
+@@ -432,6 +528,14 @@ const GalleryGestureHandler = ({
  
        translate.x.value = withDecay(configX as WithDecayConfig);
        translate.y.value = withDecay(configY as WithDecayConfig);

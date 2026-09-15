@@ -88,8 +88,10 @@ describe('Gallery 下拉 / 方向锁（补丁后）', () => {
   it.each([
     ['TS 源码', source],
     ['lib/module 产物', compiled],
-  ])('%s：下拉只跟手向下', (_name, code) => {
-    expect(code).toContain('Math.max(0, e.translationY)');
+  ])('%s：下滑不跟手，只记录距离后直接关闭', (_name, code) => {
+    // 照片不再跟着手指走（去掉了 translate.y 的写入），只把距离记在 pullDistance 里
+    expect(code).toContain('pullDistance.value = Math.max(0, e.translationY)');
+    expect(code).toMatch(/pullDistance\.value > VERTICAL_PULL_KEEP_THRESHOLD/);
   });
 
   it.each([

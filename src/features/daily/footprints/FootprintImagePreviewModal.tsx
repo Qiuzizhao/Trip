@@ -161,29 +161,6 @@ export function FootprintImagePreviewModal({
   indexRef.current = index;
   const onIndexChangeRef = useRef(onIndexChange);
   onIndexChangeRef.current = onIndexChange;
-  // 正在下拉：去掉黑色背板（只留照片跟着手指往下走）
-  const [pulling, setPulling] = useState(false);
-  const pullRestoreTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  /**
-   * 黑板只在两种时候出现：没在拖、也没在回弹。
-   * 注意「没到阈值松手」这条路径：库要用约 300ms 把照片弹回原位，
-   * 如果这时立刻把黑板拍回来，就会出现"照片还在动、黑板先闪一下"。
-   * 所以往下拖立刻去掉黑板，恢复则等回弹动画走完。
-   */
-  const handlePullingChange = useCallback((nextPulling: boolean) => {
-    if (pullRestoreTimer.current) {
-      clearTimeout(pullRestoreTimer.current);
-      pullRestoreTimer.current = null;
-    }
-    if (nextPulling) {
-      setPulling(true);
-      return;
-    }
-    pullRestoreTimer.current = setTimeout(() => {
-      pullRestoreTimer.current = null;
-      setPulling(false);
-    }, 320);
-  }, []);
   // 打开预览的时刻：用来过滤"打开那一下的抬手被 Gallery 当成单击"（会立刻把预览关掉）
   const openedAtRef = useRef(0);
   // 横屏查看：只在预览里把屏幕转过来，退出预览恢复竖屏
@@ -217,10 +194,6 @@ export function FootprintImagePreviewModal({
       setIndex(initialIndex);
       openedAtRef.current = Date.now();
     }
-    // 下拉状态活在组件上（Modal 关闭不会卸载它），必须在每次开/关时清干净：
-    // 关闭走的是"不恢复黑底"的路径（避免卸载前闪一帧纯黑），
-    // 如果这里不清，下次打开预览时黑底会一直是透明的。
-    setPulling(false);
   }
 
   useEffect(() => {
@@ -280,10 +253,7 @@ export function FootprintImagePreviewModal({
   // 下拉超过阈值并松手时关闭（和系统「照片」一致的手感）。
   // Gallery 会在 UI 线程的 worklet 里直接调用它，所以必须由 createVerticalPullHandler 生成 worklet，
   // 不能直接传普通函数（那会闪退，见 previewGestures.ts）。
-  const handleVerticalPull = useMemo(
-    () => createVerticalPullHandler(requestClose, handlePullingChange),
-    [handlePullingChange, requestClose],
-  );
+  const handleVerticalPull = useMemo(() => createVerticalPullHandler(requestClose), [requestClose]);
 
   /** 单击关闭；刚打开的那一下抬手不算（否则打开瞬间又被关掉） */
   const handleTapClose = useCallback(() => {
@@ -437,8 +407,8 @@ export function FootprintImagePreviewModal({
     >
       {/* Modal 渲染在独立的原生根视图里，手势必须自己包一层 GestureHandlerRootView */}
       <GestureHandlerRootView style={styles.root}>
-        {/* 背板：平时纯黑；往下拖的时候去掉，只留照片跟手 */}
-        <View pointerEvents="none" style={[styles.backdrop, pulling ? styles.backdropHidden : null]} />
+        {/* 背板：始终纯黑。下滑不再跟手/淡出，松手直接关闭预览（等同点空白） */}
+        <View pointerEvents="none" style={styles.backdrop} />
 
         {/* 照片层：跟手下滑由 Gallery 负责 */}
         <View style={styles.content}>
@@ -647,10 +617,6 @@ const styles = StyleSheet.create({
   backdrop: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: '#000',
-  },
-  // 下拉过程中去掉黑底（直接透明，不做过渡）
-  backdropHidden: {
-    backgroundColor: 'transparent',
   },
   // 照片层
   content: {

@@ -2,7 +2,7 @@
   "expo": {
     "name": "Trip",
     "slug": "trip-footprints",
-    "version": "1.0.7",
+    "version": "1.0.8",
     "orientation": "default",
     "icon": "./assets/images/app-icon-trip-white-route-v2.png",
     "scheme": "tripfootprints",
@@ -12,13 +12,13 @@
       "supportsTablet": true,
       "appleTeamId": "FAGAB6KML3",
       "bundleIdentifier": "com.qiuzizhao.tripfootprints",
-      "buildNumber": "24",
+      "buildNumber": "25",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
-      "versionCode": 24,
+      "versionCode": 25,
       "adaptiveIcon": {
         "backgroundColor": "#FFFFFF",
         "foregroundImage": "./assets/images/app-icon-trip-white-route-v2.png"

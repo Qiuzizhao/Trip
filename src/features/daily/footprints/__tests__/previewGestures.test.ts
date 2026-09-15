@@ -7,47 +7,40 @@ jest.mock('react-native-worklets', () => ({
   scheduleOnRN: (fn: (...args: unknown[]) => unknown, ...args: unknown[]) => fn(...args),
 }));
 
-describe('createVerticalPullHandler（极简版）', () => {
+describe('createVerticalPullHandler（下滑 = 直接退出预览）', () => {
   it('返回的回调必须是 worklet（否则 UI 线程会抛错并闪退）', () => {
-    const handler = createVerticalPullHandler(() => undefined, () => undefined);
+    const handler = createVerticalPullHandler(() => undefined);
     expect(typeof (handler as unknown as { __workletHash?: number }).__workletHash).toBe('number');
   });
 
   it('下拉超过阈值松手就关闭', () => {
     const requestClose = jest.fn();
-    createVerticalPullHandler(requestClose, () => undefined)({
+    createVerticalPullHandler(requestClose)({
       released: true,
       translateY: VERTICAL_PULL_CLOSE_THRESHOLD + 1,
     });
     expect(requestClose).toHaveBeenCalledTimes(1);
   });
 
-  it('下拉过程中会通知"正在下拉"（用来去掉黑底）', () => {
-    const onPullingChange = jest.fn();
-    const handler = createVerticalPullHandler(() => undefined, onPullingChange);
-    handler({ released: false, translateY: 40 });
-    expect(onPullingChange).toHaveBeenLastCalledWith(true);
-    handler({ released: true, translateY: 40 });
-    expect(onPullingChange).toHaveBeenLastCalledWith(false);
-  });
-
-  it('没到阈值、或者还在拖动时不关闭', () => {
+  it('没到阈值不关闭', () => {
     const requestClose = jest.fn();
-    const handler = createVerticalPullHandler(requestClose, () => undefined);
-    handler({ released: true, translateY: VERTICAL_PULL_CLOSE_THRESHOLD });
-    handler({ released: false, translateY: VERTICAL_PULL_CLOSE_THRESHOLD + 200 });
+    createVerticalPullHandler(requestClose)({
+      released: true,
+      translateY: VERTICAL_PULL_CLOSE_THRESHOLD,
+    });
     expect(requestClose).not.toHaveBeenCalled();
   });
 
-  it('关闭路径不恢复黑底（否则 Modal 卸载前会闪一帧纯黑）', () => {
+  it('拖动过程中不关闭（松手才算）', () => {
     const requestClose = jest.fn();
-    const onPullingChange = jest.fn();
-    const handler = createVerticalPullHandler(requestClose, onPullingChange);
-    handler({ released: false, translateY: 120 });
-    onPullingChange.mockClear();
-    handler({ released: true, translateY: VERTICAL_PULL_CLOSE_THRESHOLD + 40 });
-    expect(requestClose).toHaveBeenCalledTimes(1);
-    // 松手关闭这条路径上不允许再动背板
-    expect(onPullingChange).not.toHaveBeenCalled();
+    const handler = createVerticalPullHandler(requestClose);
+    handler({ released: false, translateY: VERTICAL_PULL_CLOSE_THRESHOLD + 200 });
+    handler({ released: false, translateY: 10 });
+    expect(requestClose).not.toHaveBeenCalled();
+  });
+
+  it('回调里不再有黑板/跟手相关的副作用（只有关闭这一个动作）', () => {
+    // 旧实现会通过第二个参数回调 onPullingChange 去淡出背板，那正是"闪"的来源
+    expect(createVerticalPullHandler.length).toBe(1);
   });
 });

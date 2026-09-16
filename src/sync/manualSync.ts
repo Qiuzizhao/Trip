@@ -12,6 +12,7 @@ import { normalizeTags } from '@/src/features/daily/footprints/footprintTags';
 import { repairEmptyAssetObjects } from './assetRepair';
 import { runAssetSync } from './assetQueue';
 import { mergeSyncRecords } from './syncMerge';
+import { countProgress, ratioProgress, SYNC_PROGRESS_COMPLETE, type SyncProgressListener } from './syncProgress';
 import { createSupabaseFileApi, SUPABASE_SYNC_TARGET_ID } from './supabase/fileApiFactory';
 import { createSupabaseSyncBackend } from './supabase/syncBackend';
 import { getCurrentSession, getSupabaseClient, isSupabaseConfigured } from './supabaseClient';
@@ -66,11 +67,12 @@ function toLocalFootprint(footprint: Record<string, unknown>): FootprintItem {
 // 历史上传 bug 留下的 0 字节对象：按 asset 重传（新命名用资产自己的文件，旧命名按对象名里的 hash 反查）。
 // 每次同步都跑：开销只是「每个目录一次 list」，但能自愈
 // （曾经的「只跑一次」标记会在资产尚未从服务器同步下来时被过早置位，导致永远不再修复）。
-async function repairAssetObjectsOnce() {
+async function repairAssetObjectsOnce(onProgress?: (done: number, total: number) => void) {
   try {
     const result = await repairEmptyAssetObjects({
       backend: createSupabaseSyncBackend(),
       assets: await listAllAssets(),
+      onProgress,
     });
     return result.repaired;
   } catch {
@@ -79,7 +81,12 @@ async function repairAssetObjectsOnce() {
   }
 }
 
-export async function runManualSync(): Promise<ManualSyncResult> {
+export async function runManualSync({
+  onProgress,
+}: {
+  /** 同步进度回调：只给「同步中」弹窗用，不影响同步结果 */
+  onProgress?: SyncProgressListener;
+} = {}): Promise<ManualSyncResult> {
   if (!isSupabaseConfigured()) {
     throw new Error('还没有配置 Supabase。请设置 EXPO_PUBLIC_SUPABASE_URL 和 EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY。');
   }
@@ -91,6 +98,7 @@ export async function runManualSync(): Promise<ManualSyncResult> {
   const session = await getCurrentSession();
   if (!session?.user) return { status: 'signedOut' };
 
+  const report = onProgress;
   const supabase = getSupabaseClient();
   const userId = session.user.id;
   const syncedAt = new Date().toISOString();
@@ -104,12 +112,14 @@ export async function runManualSync(): Promise<ManualSyncResult> {
   );
 
   // 1) 记录级同步（只含元数据）
+  report?.(countProgress('records', 0, pendingFootprints.length, ' 条'));
   if (pendingFootprints.length > 0) {
     const { error } = await supabase
       .from('trip_footprints')
       .upsert(pendingFootprints.map((footprint) => toRemoteFootprint(footprint, userId)), { onConflict: 'id' });
     if (error) throw error;
   }
+  report?.(countProgress('records', pendingFootprints.length, pendingFootprints.length, ' 条'));
 
   // 2) 资产级同步
   let assetResult = {
@@ -120,17 +130,37 @@ export async function runManualSync(): Promise<ManualSyncResult> {
     deleted: 0,
     touchedFootprintIds: [] as string[],
   };
+  report?.(ratioProgress('assets', 0, '同步照片资产…'));
   try {
     const fileApi = await createSupabaseFileApi();
-    assetResult = await runAssetSync({ fileApi, userId, syncTargetId: SUPABASE_SYNC_TARGET_ID });
+    assetResult = await runAssetSync({
+      fileApi,
+      userId,
+      syncTargetId: SUPABASE_SYNC_TARGET_ID,
+      onProgress: (done, total, stage) => {
+        // 资产阶段内部再分两段：上传占 0.6，下载恢复占 0.4
+        const share = total > 0 ? done / total : 1;
+        const label = stage === 'upload' ? '上传' : '下载';
+        report?.(ratioProgress(
+          'assets',
+          stage === 'upload' ? share * 0.6 : 0.6 + share * 0.4,
+          total > 0 ? `同步照片资产 · ${label} ${done}/${total} 张` : '同步照片资产',
+          total > 0 ? `${done}/${total}` : undefined,
+        ));
+      },
+    });
   } catch {
     // 资产队列整体不可用时（未登录/网络异常），保留记录级同步结果
   }
 
   // 3) 老数据修复（放在资产同步之后：这样刚从服务器同步下来的资产也能参与修复）
-  const repairedAssetObjects = await repairAssetObjectsOnce();
+  report?.(ratioProgress('repair', 0, '修复历史空图…'));
+  const repairedAssetObjects = await repairAssetObjectsOnce(
+    (done, total) => report?.(countProgress('repair', done, total, ' 张')),
+  );
 
   // 4) 拉取远端记录并合并
+  report?.(ratioProgress('merge', 0, '拉取云端记录…'));
   const { data: remoteFootprintsData, error: remoteFootprintsError } = await supabase
     .from('trip_footprints')
     .select('id,user_id,location,coordinate,visit_date,notes,tags,rating,created_at,updated_at,deleted_at')
@@ -138,6 +168,7 @@ export async function runManualSync(): Promise<ManualSyncResult> {
   if (remoteFootprintsError) throw remoteFootprintsError;
 
   const remoteFootprints = ((remoteFootprintsData ?? []) as Record<string, unknown>[]).map(toLocalFootprint);
+  report?.(countProgress('merge', remoteFootprints.length, remoteFootprints.length, ' 条'));
   const pendingById = new Map(pendingFootprints.map((footprint) => [footprint.id, footprint]));
   const mergedFootprints = mergeSyncRecords(
     localFootprints.map((footprint) => ({
@@ -149,6 +180,7 @@ export async function runManualSync(): Promise<ManualSyncResult> {
 
   await replaceFootprintsFromSync(mergedFootprints);
   await saveSyncMetadata({ ...(await getSyncMetadata()), last_synced_at: syncedAt });
+  report?.(SYNC_PROGRESS_COMPLETE);
 
   return {
     status: 'synced',

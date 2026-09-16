@@ -28,11 +28,15 @@ function legacyHashFromObjectName(name: string) {
 export async function repairEmptyAssetObjects({
   backend,
   assets,
+  onProgress,
 }: {
   backend: SyncBackend;
   assets: Asset[];
+  /** 每检查完一条候选资产回报一次（done 是已检查条数，total 是候选总数） */
+  onProgress?: (done: number, total: number) => void;
 }): Promise<AssetRepairResult> {
   const candidates = assets.filter((asset) => Boolean(asset.remoteKey));
+  onProgress?.(0, candidates.length);
   if (!candidates.length) return { repaired: 0, failed: 0, unchecked: 0 };
 
   const localFilesByHash = await listPersistedFootprintImageHashes();
@@ -40,6 +44,7 @@ export async function repairEmptyAssetObjects({
   let repaired = 0;
   let failed = 0;
   let unchecked = 0;
+  let scanned = 0;
 
   for (const asset of candidates) {
     const objectKey = asset.remoteKey as string;
@@ -47,48 +52,53 @@ export async function repairEmptyAssetObjects({
     const name = parts.pop() as string;
     const folder = parts.join('/');
 
-    if (!sizesByFolder.has(folder)) {
-      sizesByFolder.set(folder, await backend.listSizes(folder));
-    }
-    const sizes = sizesByFolder.get(folder);
-    if (!sizes) {
-      unchecked += 1;
-      continue;
-    }
-
-    const size = sizes.get(name);
-    // 只有「对象不存在」或「对象为空」才需要修；内容正常则跳过
-    if (size !== undefined && size > 0) continue;
-
-    let localUri = await localUriForAsset(asset);
-    if (!localUri) {
-      const hash = legacyHashFromObjectName(name);
-      if (hash) localUri = localFilesByHash.get(hash) ?? null;
-    }
-    if (!localUri) {
-      // 没有本地原图就无法修：标记失败（UI 显示待处理），下次同步还会再试
-      await markAssetFailed({ assetId: asset.id, error: '本地原图不存在，无法修复空对象' });
-      failed += 1;
-      continue;
-    }
-
-    // 本地文件必须真的是图片：否则只会上传一份无效内容（例如下载错误留下的 JSON）
-    if (!(await isImageFile(localUri))) {
-      const context = await ensureFootprintImageDirectory();
-      if (context) {
-        await context.FileSystem.deleteAsync(localUri, { idempotent: true }).catch(() => undefined);
-      }
-      await markAssetFailed({ assetId: asset.id, error: '本地文件不是有效图片，已删除' });
-      failed += 1;
-      continue;
-    }
-
     try {
-      const storedSize = await backend.uploadBlob(objectKey, localUri, contentTypeForObjectKey(objectKey));
-      if (!storedSize) throw new Error(`上传后仍为空：${objectKey}`);
-      repaired += 1;
-    } catch {
-      failed += 1;
+      if (!sizesByFolder.has(folder)) {
+        sizesByFolder.set(folder, await backend.listSizes(folder));
+      }
+      const sizes = sizesByFolder.get(folder);
+      if (!sizes) {
+        unchecked += 1;
+        continue;
+      }
+
+      const size = sizes.get(name);
+      // 只有「对象不存在」或「对象为空」才需要修；内容正常则跳过
+      if (size !== undefined && size > 0) continue;
+
+      let localUri = await localUriForAsset(asset);
+      if (!localUri) {
+        const hash = legacyHashFromObjectName(name);
+        if (hash) localUri = localFilesByHash.get(hash) ?? null;
+      }
+      if (!localUri) {
+        // 没有本地原图就无法修：标记失败（UI 显示待处理），下次同步还会再试
+        await markAssetFailed({ assetId: asset.id, error: '本地原图不存在，无法修复空对象' });
+        failed += 1;
+        continue;
+      }
+
+      // 本地文件必须真的是图片：否则只会上传一份无效内容（例如下载错误留下的 JSON）
+      if (!(await isImageFile(localUri))) {
+        const context = await ensureFootprintImageDirectory();
+        if (context) {
+          await context.FileSystem.deleteAsync(localUri, { idempotent: true }).catch(() => undefined);
+        }
+        await markAssetFailed({ assetId: asset.id, error: '本地文件不是有效图片，已删除' });
+        failed += 1;
+        continue;
+      }
+
+      try {
+        const storedSize = await backend.uploadBlob(objectKey, localUri, contentTypeForObjectKey(objectKey));
+        if (!storedSize) throw new Error(`上传后仍为空：${objectKey}`);
+        repaired += 1;
+      } catch {
+        failed += 1;
+      }
+    } finally {
+      scanned += 1;
+      onProgress?.(scanned, candidates.length);
     }
   }
 

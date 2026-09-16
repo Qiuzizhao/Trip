@@ -141,10 +141,13 @@ export async function runAssetSync({
   fileApi,
   userId,
   syncTargetId,
+  onProgress,
 }: {
   fileApi: FileApi;
   userId: string;
   syncTargetId: number;
+  /** 资产阶段进度：stage='upload' 是上传队列，stage='download' 是下载恢复 */
+  onProgress?: (done: number, total: number, stage: 'upload' | 'download') => void;
 }): Promise<AssetSyncResult> {
   const result: AssetSyncResult = {
     uploaded: 0,
@@ -165,11 +168,14 @@ export async function runAssetSync({
   };
 
   // --- 1) 上传本地待同步的图片 ---
+  const uploadTargets = (await listAssetsNeedingUpload()).filter(shouldUploadAsset);
+  let uploadedCount = 0;
+  onProgress?.(0, uploadTargets.length, 'upload');
+
   const uploadQueue = new TaskQueue('assetUpload');
   uploadQueue.setConcurrency(ASSET_UPLOAD_CONCURRENCY);
 
-  for (const asset of await listAssetsNeedingUpload()) {
-    if (!shouldUploadAsset(asset)) continue;
+  for (const asset of uploadTargets) {
     uploadQueue.push(asset.id, async () => {
       try {
         if (!(await canUploadAsset(asset))) {
@@ -196,6 +202,9 @@ export async function runAssetSync({
           error: error instanceof Error ? error.message : String(error),
         });
         result.failed += 1;
+      } finally {
+        uploadedCount += 1;
+        onProgress?.(uploadedCount, uploadTargets.length, 'upload');
       }
     });
   }
@@ -235,10 +244,16 @@ export async function runAssetSync({
   // --- 4) 远端有元数据、本地没有图片 -> 下载恢复 ---
   const context = await ensureFootprintImageDirectory();
   if (context) {
+    let scanned = 0;
+    onProgress?.(0, remoteAssets.length, 'download');
     for (const metadata of remoteAssets) {
       const local = (await listAllAssets()).find((asset) => asset.id === metadata.id);
       const localUri = local ? await localUriForAsset(local) : null;
-      if (localUri) continue;
+      if (localUri) {
+        scanned += 1;
+        onProgress?.(scanned, remoteAssets.length, 'download');
+        continue;
+      }
 
       try {
         const destUri = `${context.dir}${metadata.fileName}`;
@@ -283,6 +298,9 @@ export async function runAssetSync({
           forceSync: false,
         });
         result.failed += 1;
+      } finally {
+        scanned += 1;
+        onProgress?.(scanned, remoteAssets.length, 'download');
       }
     }
   }

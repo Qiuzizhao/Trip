@@ -115,7 +115,12 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         launchOptions[.sourceApplication] = source
       }
     }
-    (UIApplication.shared.delegate as? AppDelegate)?.startReactNative(in: window, launchOptions: launchOptions)
+    let appDelegate = UIApplication.shared.delegate as? AppDelegate
+    // Expo Linking also keeps its own initial URL; seed it before React mounts.
+    for context in connectionOptions.urlContexts {
+      _ = appDelegate?.application(UIApplication.shared, open: context.url, options: [:])
+    }
+    appDelegate?.startReactNative(in: window, launchOptions: launchOptions)
   }
 
   func scene(_ scene: UIScene, openURLContexts URLContexts: Set<UIOpenURLContext>) {
@@ -131,7 +136,9 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         options[.annotation] = annotation
       }
 
-      _ = RCTLinkingManager.application(UIApplication.shared, open: context.url, options: options)
+      _ = (UIApplication.shared.delegate as? AppDelegate)?.application(
+        UIApplication.shared, open: context.url, options: options)
+
     }
   }
 

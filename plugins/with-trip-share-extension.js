@@ -1,5 +1,5 @@
 const { withXcodeProject } = require('@expo/config-plugins');
-const withShareIntent = require('expo-share-intent/app.plugin');
+const withShareIntent = require('expo-share-intent/app.plugin').default;
 const fs = require('fs');
 const path = require('path');
 

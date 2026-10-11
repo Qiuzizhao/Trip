@@ -4,11 +4,8 @@ const fs = require('fs');
 const path = require('path');
 
 module.exports = function withTripShareExtension(config) {
-  config = withShareIntent(config, {
-    iosActivationRules: { NSExtensionActivationSupportsImageWithMaxCount: 1000 },
-    disableAndroid: true,
-  });
-  return withXcodeProject(config, (config) => {
+  // Mods run in reverse registration order: replace the controller after generation.
+  config = withXcodeProject(config, (config) => {
     const root = config.modRequest.platformProjectRoot;
     const source = fs.readFileSync(path.join(__dirname, 'TripShareViewController.swift'), 'utf8')
       .replaceAll('<GROUPIDENTIFIER>', `group.${config.ios.bundleIdentifier}`)
@@ -30,5 +27,9 @@ module.exports = function withTripShareExtension(config) {
       }
     }
     return config;
+  });
+  return withShareIntent(config, {
+    iosActivationRules: { NSExtensionActivationSupportsImageWithMaxCount: 1000 },
+    disableAndroid: true,
   });
 };

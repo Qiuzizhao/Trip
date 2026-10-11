@@ -30,9 +30,9 @@ export function ShareIntentHandler() {
         resetShareIntent();
         router.push({ pathname: '/daily/footprint-edit', params: { shareDraft } });
       })
-      .catch((err) => {
+      .catch(() => {
         resetShareIntent();
-        Alert.alert('导入照片失败', err instanceof Error ? err.message : '请在相册中重新分享。');
+        Alert.alert('导入照片失败', '照片未能完整导入，请回到相册重新分享到 Trip。');
       })
       .finally(() => { busy.current = false; setImporting(false); });
   }, [hasShareIntent, shareIntent, navigation?.key, resetShareIntent, router]);

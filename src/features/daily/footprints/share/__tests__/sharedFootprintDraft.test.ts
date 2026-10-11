@@ -1,3 +1,4 @@
+import { beforeEach, expect, it, jest } from '@jest/globals';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as FileSystem from 'expo-file-system/legacy';
 import { persistFootprintImageUri } from '../../footprintImageFiles';
@@ -7,7 +8,7 @@ import { redirectSystemPath } from '../../../../../../app/+native-intent';
 jest.mock('@react-native-async-storage/async-storage', () => ({
   setItem: jest.fn(), getItem: jest.fn(), removeItem: jest.fn(),
 }));
-jest.mock('expo-file-system/legacy', () => ({ deleteAsync: jest.fn().mockResolvedValue(undefined) }));
+jest.mock('expo-file-system/legacy', () => ({ deleteAsync: jest.fn<() => Promise<void>>().mockResolvedValue(undefined) }));
 jest.mock('../../footprintImageFiles', () => ({ persistFootprintImageUri: jest.fn() }));
 const file = (path: string, mimeType = 'image/jpeg', fileName = 'photo.jpg') => ({ path, mimeType, fileName });
 

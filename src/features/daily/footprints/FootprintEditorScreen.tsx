@@ -15,6 +15,7 @@ import { FootprintImagePreviewModal } from './FootprintImagePreviewModal';
 import { FootprintThumbnail } from './FootprintThumbnail';
 import { persistFootprintImageUri } from './footprintImageFiles';
 import { collectTagCounts, formatTagsInput, normalizeTags, parseTagInput } from './footprintTags';
+import { readSharedFootprintDraft } from './share/sharedFootprintDraft';
 import { tagColorFor } from './tagColors';
 import { readTakenAtFromFile, takenAtOptions } from './imageMetadata';
 
@@ -87,14 +88,16 @@ async function findFootprintById(id: string) {
 
 export function FootprintEditorScreen({
   footprintId,
+  sharedDraftId,
   onBack,
 }: {
   footprintId?: string | null;
+  sharedDraftId?: string;
   onBack: () => void;
 }) {
   const isEditing = typeof footprintId === 'string' && Boolean(footprintId);
   const [form, setForm] = useState<FootprintForm>(() => createFootprintForm());
-  const [loading, setLoading] = useState(Boolean(isEditing));
+  const [loading, setLoading] = useState(Boolean(isEditing || sharedDraftId));
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [previewIndex, setPreviewIndex] = useState<number | null>(null);
@@ -185,6 +188,17 @@ export function FootprintEditorScreen({
       mounted = false;
     };
   }, [footprintId, isEditing]);
+
+  useEffect(() => {
+    if (isEditing || !sharedDraftId) return;
+    let mounted = true;
+    setLoading(true);
+    void readSharedFootprintDraft(sharedDraftId)
+      .then((image_urls) => { if (mounted) setForm({ ...createFootprintForm(), image_urls }); })
+      .catch((err) => { if (mounted) setError(err instanceof Error ? err.message : '导入照片失败'); })
+      .finally(() => { if (mounted) setLoading(false); });
+    return () => { mounted = false; };
+  }, [sharedDraftId, isEditing]);
 
   const pickImage = async () => {
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();

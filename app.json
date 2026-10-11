@@ -12,7 +12,7 @@
       "supportsTablet": true,
       "appleTeamId": "FAGAB6KML3",
       "bundleIdentifier": "com.qiuzizhao.tripfootprints",
-      "buildNumber": "30",
+      "buildNumber": "31",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
       }
@@ -47,7 +47,8 @@
       "expo-web-browser",
       "expo-asset",
       "expo-font",
-      "./plugins/with-ios-scene-lifecycle"
+      "./plugins/with-ios-scene-lifecycle",
+      "./plugins/with-trip-share-extension"
     ],
     "experiments": {
       "typedRoutes": true

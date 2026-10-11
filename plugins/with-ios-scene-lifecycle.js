@@ -39,7 +39,15 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
 
     let window = UIWindow(windowScene: windowScene)
     self.window = window
-    (UIApplication.shared.delegate as? AppDelegate)?.startReactNative(in: window)
+    // Preserve a share URL when Photos launches a terminated app.
+    var launchOptions: [UIApplication.LaunchOptionsKey: Any] = [:]
+    if let context = connectionOptions.urlContexts.first {
+      launchOptions[.url] = context.url
+      if let source = context.options.sourceApplication {
+        launchOptions[.sourceApplication] = source
+      }
+    }
+    (UIApplication.shared.delegate as? AppDelegate)?.startReactNative(in: window, launchOptions: launchOptions)
   }
 
   func scene(_ scene: UIScene, openURLContexts URLContexts: Set<UIOpenURLContext>) {

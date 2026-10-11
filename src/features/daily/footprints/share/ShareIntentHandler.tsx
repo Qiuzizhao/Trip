@@ -16,7 +16,9 @@ export function ShareIntentHandler() {
   const [importing, setImporting] = useState(false);
 
   useEffect(() => {
-    if (!hasShareIntent) { handled.current = null; return; }
+    // Keep the last signature after reset: cold launch can emit the same inbox twice.
+    // A later Photos share uses fresh native file names, even for the same photos.
+    if (!hasShareIntent) return;
     if (!navigation?.key || busy.current) return;
     const signature = JSON.stringify(shareIntent.files);
     if (handled.current === signature) return;

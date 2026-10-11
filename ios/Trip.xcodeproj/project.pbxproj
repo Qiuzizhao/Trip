@@ -8,20 +8,56 @@
 
 /* Begin PBXBuildFile section */
 		13B07FBF1A68108700A75B9A /* Images.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 13B07FB51A68108700A75B9A /* Images.xcassets */; };
+		1DA297593FE3439E8DA2769E /* ShareViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 957268B5D97B48BEA24EBCA3 /* ShareViewController.swift */; };
 		284AAD359C6351E6683B0F7A /* libPods-Trip.a in Frameworks */ = {isa = PBXBuildFile; fileRef = A37B09A4FBAD06BB1DB7C6B4 /* libPods-Trip.a */; };
 		3E461D99554A48A4959DE609 /* SplashScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = AA286B85B6C04FC6940260E9 /* SplashScreen.storyboard */; };
 		9A9C137F8BBFA7F973C4D0C1 /* ExpoModulesProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = DAD44D91A576F4278448B8C5 /* ExpoModulesProvider.swift */; };
+		A7BF523CC7FF44408299ABFC /* ShareExtensionPreprocessor.js in Resources */ = {isa = PBXBuildFile; fileRef = 8A5AD26D7C0345B1B0D48691 /* ShareExtensionPreprocessor.js */; };
+		B04D0E31539646A0AC6C3E13 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 1547FCFD50A14ABD8206C7BB /* PrivacyInfo.xcprivacy */; };
+		B46DE5ECC9144CA4B6B53F86 /* MainInterface.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 351591D97E1E402EAB2DCB7E /* MainInterface.storyboard */; };
 		BB2F792D24A3F905000567C9 /* Expo.plist in Resources */ = {isa = PBXBuildFile; fileRef = BB2F792C24A3F905000567C9 /* Expo.plist */; };
 		CBBF203758947AA0BD4B8410 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 3B6A188FAD0C1F833CE53F93 /* PrivacyInfo.xcprivacy */; };
 		F11748422D0307B40044C1D9 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = F11748412D0307B40044C1D9 /* AppDelegate.swift */; };
+		F6A149D2A4014E8AA075B3B6 /* ShareExtension.appex in Copy Files */ = {isa = PBXBuildFile; fileRef = 57535BCFE4B54EC5B6B1CBB0 /* ShareExtension.appex */; };
 /* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		B6F66A4FA59249A298379784 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 83CBB9F71A601CBA00E9B192 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 971E282FD03E43AFA4977D1D;
+			remoteInfo = ShareExtension;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		19B056238A2B45BEA0F87FD1 /* Copy Files */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				F6A149D2A4014E8AA075B3B6 /* ShareExtension.appex in Copy Files */,
+			);
+			name = "Copy Files";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
 		13B07F961A680F5B00A75B9A /* Trip.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Trip.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		13B07FB51A68108700A75B9A /* Images.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; name = Images.xcassets; path = Trip/Images.xcassets; sourceTree = "<group>"; };
 		13B07FB61A68108700A75B9A /* Info.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; name = Info.plist; path = Trip/Info.plist; sourceTree = "<group>"; };
+		1547FCFD50A14ABD8206C7BB /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = undefined; includeInIndex = 0; lastKnownFileType = unknown; name = PrivacyInfo.xcprivacy; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		351591D97E1E402EAB2DCB7E /* MainInterface.storyboard */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = undefined; includeInIndex = 0; lastKnownFileType = unknown; name = MainInterface.storyboard; path = MainInterface.storyboard; sourceTree = "<group>"; };
 		3B6A188FAD0C1F833CE53F93 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; includeInIndex = 1; name = PrivacyInfo.xcprivacy; path = Trip/PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		57535BCFE4B54EC5B6B1CBB0 /* ShareExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; fileEncoding = undefined; includeInIndex = 0; lastKnownFileType = undefined; name = ShareExtension.appex; path = ShareExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		582F50C46DA13019D0AA2082 /* Pods-Trip.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Trip.debug.xcconfig"; path = "Target Support Files/Pods-Trip/Pods-Trip.debug.xcconfig"; sourceTree = "<group>"; };
+		8677AE9D800D40F6869E16AD /* ShareExtension.entitlements */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = undefined; includeInIndex = 0; lastKnownFileType = unknown; name = ShareExtension.entitlements; path = ShareExtension.entitlements; sourceTree = "<group>"; };
+		8A5AD26D7C0345B1B0D48691 /* ShareExtensionPreprocessor.js */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = undefined; includeInIndex = 0; lastKnownFileType = unknown; name = ShareExtensionPreprocessor.js; path = ShareExtensionPreprocessor.js; sourceTree = "<group>"; };
+		8DC781D4C7C942DFBEA275CF /* ShareExtension-Info.plist */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = 4; includeInIndex = 0; lastKnownFileType = text.plist.xml; name = "ShareExtension-Info.plist"; path = "ShareExtension-Info.plist"; sourceTree = "<group>"; };
+		957268B5D97B48BEA24EBCA3 /* ShareViewController.swift */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = 4; includeInIndex = 0; lastKnownFileType = sourcecode.swift; name = ShareViewController.swift; path = ShareViewController.swift; sourceTree = "<group>"; };
 		A37B09A4FBAD06BB1DB7C6B4 /* libPods-Trip.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = "libPods-Trip.a"; sourceTree = BUILT_PRODUCTS_DIR; };
 		AA286B85B6C04FC6940260E9 /* SplashScreen.storyboard */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = file.storyboard; name = SplashScreen.storyboard; path = Trip/SplashScreen.storyboard; sourceTree = "<group>"; };
 		BB2F792C24A3F905000567C9 /* Expo.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; path = Expo.plist; sourceTree = "<group>"; };
@@ -38,6 +74,13 @@
 			buildActionMask = 2147483647;
 			files = (
 				284AAD359C6351E6683B0F7A /* libPods-Trip.a in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		CED1AEB78C1E4E71A23E0D85 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -93,6 +136,20 @@
 			path = Pods;
 			sourceTree = "<group>";
 		};
+		536A96C452214B5488F38DCC /* ShareExtension */ = {
+			isa = PBXGroup;
+			children = (
+				957268B5D97B48BEA24EBCA3 /* ShareViewController.swift */,
+				351591D97E1E402EAB2DCB7E /* MainInterface.storyboard */,
+				8A5AD26D7C0345B1B0D48691 /* ShareExtensionPreprocessor.js */,
+				1547FCFD50A14ABD8206C7BB /* PrivacyInfo.xcprivacy */,
+				8DC781D4C7C942DFBEA275CF /* ShareExtension-Info.plist */,
+				8677AE9D800D40F6869E16AD /* ShareExtension.entitlements */,
+			);
+			name = ShareExtension;
+			path = ShareExtension;
+			sourceTree = "<group>";
+		};
 		832341AE1AAA6A7D00B99B32 /* Libraries */ = {
 			isa = PBXGroup;
 			children = (
@@ -109,6 +166,7 @@
 				2D16E6871FA4F8E400B85C8A /* Frameworks */,
 				3860B38A45371B5D7CEB8C27 /* Pods */,
 				33D38B2D66A48072982C90FE /* ExpoModulesProviders */,
+				536A96C452214B5488F38DCC /* ShareExtension */,
 			);
 			indentWidth = 2;
 			sourceTree = "<group>";
@@ -119,6 +177,7 @@
 			isa = PBXGroup;
 			children = (
 				13B07F961A680F5B00A75B9A /* Trip.app */,
+				57535BCFE4B54EC5B6B1CBB0 /* ShareExtension.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -147,15 +206,34 @@
 				00DD1BFF1BD5951E006B06BC /* Bundle React Native code and images */,
 				800E24972A6A228C8D4807E9 /* [CP] Copy Pods Resources */,
 				D7DBDBC4C6C61F86AD78D899 /* [CP] Embed Pods Frameworks */,
+				19B056238A2B45BEA0F87FD1 /* Copy Files */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				E021BD9F369F4825823D8304 /* PBXTargetDependency */,
 			);
 			name = Trip;
 			productName = Trip;
 			productReference = 13B07F961A680F5B00A75B9A /* Trip.app */;
 			productType = "com.apple.product-type.application";
+		};
+		971E282FD03E43AFA4977D1D /* ShareExtension */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = D54FD8F0C0C44FC2B17FACBC /* Build configuration list for PBXNativeTarget "ShareExtension" */;
+			buildPhases = (
+				C3430B3A458B4ED68E0B2F0F /* Sources */,
+				696F9E299AFC4B3ABA614F98 /* Resources */,
+				CED1AEB78C1E4E71A23E0D85 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = ShareExtension;
+			productName = ShareExtension;
+			productReference = 57535BCFE4B54EC5B6B1CBB0 /* ShareExtension.appex */;
+			productType = "com.apple.product-type.app-extension";
 		};
 /* End PBXNativeTarget section */
 
@@ -166,6 +244,7 @@
 				LastUpgradeCheck = 1130;
 				TargetAttributes = {
 					13B07F861A680F5B00A75B9A = {
+						DevelopmentTeam = FAGAB6KML3;
 						LastSwiftMigration = 1250;
 					};
 				};
@@ -184,6 +263,7 @@
 			projectRoot = "";
 			targets = (
 				13B07F861A680F5B00A75B9A /* Trip */,
+				971E282FD03E43AFA4977D1D /* ShareExtension */,
 			);
 		};
 /* End PBXProject section */
@@ -197,6 +277,16 @@
 				13B07FBF1A68108700A75B9A /* Images.xcassets in Resources */,
 				3E461D99554A48A4959DE609 /* SplashScreen.storyboard in Resources */,
 				CBBF203758947AA0BD4B8410 /* PrivacyInfo.xcprivacy in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		696F9E299AFC4B3ABA614F98 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B46DE5ECC9144CA4B6B53F86 /* MainInterface.storyboard in Resources */,
+				A7BF523CC7FF44408299ABFC /* ShareExtensionPreprocessor.js in Resources */,
+				B04D0E31539646A0AC6C3E13 /* PrivacyInfo.xcprivacy in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -332,7 +422,23 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		C3430B3A458B4ED68E0B2F0F /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				1DA297593FE3439E8DA2769E /* ShareViewController.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		E021BD9F369F4825823D8304 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 971E282FD03E43AFA4977D1D /* ShareExtension */;
+			targetProxy = B6F66A4FA59249A298379784 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		13B07F941A680F5B00A75B9A /* Debug */ = {
@@ -342,7 +448,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_ENABLE_MODULES = YES;
 				CODE_SIGN_ENTITLEMENTS = Trip/Trip.entitlements;
-				CURRENT_PROJECT_VERSION = 30;
+				CURRENT_PROJECT_VERSION = 31;
 				DEVELOPMENT_TEAM = FAGAB6KML3;
 				ENABLE_BITCODE = NO;
 				GCC_PREPROCESSOR_DEFINITIONS = (
@@ -363,7 +469,7 @@
 				);
 				OTHER_SWIFT_FLAGS = "$(inherited) -D EXPO_CONFIGURATION_DEBUG";
 				PRODUCT_BUNDLE_IDENTIFIER = com.qiuzizhao.tripfootprints;
-				PRODUCT_NAME = "Trip";
+				PRODUCT_NAME = Trip;
 				SWIFT_OBJC_BRIDGING_HEADER = "Trip/Trip-Bridging-Header.h";
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 				SWIFT_VERSION = 5.0;
@@ -379,7 +485,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_ENABLE_MODULES = YES;
 				CODE_SIGN_ENTITLEMENTS = Trip/Trip.entitlements;
-				CURRENT_PROJECT_VERSION = 30;
+				CURRENT_PROJECT_VERSION = 31;
 				DEVELOPMENT_TEAM = FAGAB6KML3;
 				INFOPLIST_FILE = Trip/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 15.1;
@@ -395,7 +501,7 @@
 				);
 				OTHER_SWIFT_FLAGS = "$(inherited) -D EXPO_CONFIGURATION_RELEASE";
 				PRODUCT_BUNDLE_IDENTIFIER = com.qiuzizhao.tripfootprints;
-				PRODUCT_NAME = "Trip";
+				PRODUCT_NAME = Trip;
 				SWIFT_OBJC_BRIDGING_HEADER = "Trip/Trip-Bridging-Header.h";
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -521,6 +627,64 @@
 			};
 			name = Release;
 		};
+		89F396546F174B0CB3C87542 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ENABLE_MODULES = YES;
+				CODE_SIGN_ENTITLEMENTS = ShareExtension/ShareExtension.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 31;
+				DEVELOPMENT_TEAM = FAGAB6KML3;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "ShareExtension/ShareExtension-Info.plist";
+				IPHONEOS_DEPLOYMENT_TARGET = 15.1;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0.10;
+				OTHER_SWIFT_FLAGS = "$(inherited) -D EXPO_CONFIGURATION_RELEASE";
+				PRODUCT_BUNDLE_IDENTIFIER = "com.qiuzizhao.tripfootprints.share-extension";
+				PRODUCT_NAME = ShareExtension;
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		9D175EBB4FFD43DDB28AB94E /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ENABLE_MODULES = YES;
+				CODE_SIGN_ENTITLEMENTS = ShareExtension/ShareExtension.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 31;
+				DEVELOPMENT_TEAM = FAGAB6KML3;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "ShareExtension/ShareExtension-Info.plist";
+				IPHONEOS_DEPLOYMENT_TARGET = 15.1;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0.10;
+				OTHER_SWIFT_FLAGS = "$(inherited) -D EXPO_CONFIGURATION_DEBUG";
+				PRODUCT_BUNDLE_IDENTIFIER = "com.qiuzizhao.tripfootprints.share-extension";
+				PRODUCT_NAME = ShareExtension;
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -538,6 +702,15 @@
 			buildConfigurations = (
 				83CBBA201A601CBA00E9B192 /* Debug */,
 				83CBBA211A601CBA00E9B192 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		D54FD8F0C0C44FC2B17FACBC /* Build configuration list for PBXNativeTarget "ShareExtension" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				9D175EBB4FFD43DDB28AB94E /* Debug */,
+				89F396546F174B0CB3C87542 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

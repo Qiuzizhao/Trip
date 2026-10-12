@@ -289,6 +289,7 @@ export const styles = StyleSheet.create({
     ...postcardShadowSoft,
   },
   postcardSearchInput: { color: postcardColors.ink, flex: 1, fontSize: 14.5, fontWeight: '600', minHeight: 44, paddingHorizontal: 0 },
+  postcardFilterLabel: { color: postcardColors.inkFaint, fontSize: 11, fontWeight: '700', marginTop: 14 },
   postcardPills: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 12 },
   postcardPill: {
     alignItems: 'center',
@@ -438,6 +439,10 @@ export const styles = StyleSheet.create({
   editNoteBar: { backgroundColor: postcardColors.skyDeep, borderRadius: 3, bottom: 12, left: 8, position: 'absolute', top: 12, width: 3 },
   editNoteInput: { color: '#3F4853', fontSize: 13.5, lineHeight: 22, minHeight: 60, padding: 0, textAlignVertical: 'top' },
   editNoteSign: { color: postcardColors.inkFaint, fontFamily: 'Menlo', fontSize: 11, letterSpacing: 0.5, marginTop: 6 },
+  editCityHint: { color: postcardColors.inkFaint, fontSize: 11, marginTop: 8 },
+  editCoverHint: { position: 'absolute', left: 10, bottom: 10, flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: 'rgba(15,23,42,0.66)', paddingHorizontal: 9, paddingVertical: 5, borderRadius: 12 },
+  editCoverHintText: { color: '#fff', fontSize: 11, fontWeight: '700' },
+  editCoverBadge: { position: 'absolute', left: 3, bottom: 3, backgroundColor: 'rgba(15,23,42,0.66)', borderRadius: 6, paddingHorizontal: 5, paddingVertical: 2 },
   editThumbStrip: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 10 },
   editThumb: { borderRadius: 14, height: 66, overflow: 'hidden', width: 66 },
   editThumbRemove: {

@@ -10,6 +10,7 @@ import {
   createAssetFromExistingFile,
   deleteAssetsByFootprint,
   listAssetsByFootprint,
+  reorderAssetsByFootprint,
 } from './assetRepository';
 
 function isRemoteUri(uri: string) {
@@ -39,8 +40,21 @@ export async function rebuildAssetsForFootprint(footprintId: string, imageUris: 
   const existing = await listAssetsByFootprint(footprintId);
   if (existing.length === imageUris.length) {
     const existingUris = await Promise.all(existing.map((asset) => resolveAssetUri(asset)));
-    const aligned = existingUris.every((uri, index) => uri === imageUris[index]);
-    if (aligned) return imageUris;
+    const used = new Set<string>();
+    const reordered = imageUris.map((uri) => {
+      const asset = existing.find((candidate, index) => !used.has(candidate.id) && (
+        uri === existingUris[index] || uri === assetLocalUriSync(candidate)
+        || (candidate.remoteKey && uri === publicUrlForObjectKey(candidate.remoteKey))
+      ));
+      if (asset) used.add(asset.id);
+      return asset;
+    });
+    if (reordered.every((asset) => Boolean(asset))) {
+      if (reordered.some((asset, index) => asset!.id !== existing[index].id)) {
+        await reorderAssetsByFootprint(footprintId, reordered.map((asset) => asset!.id));
+      }
+      return imageUris;
+    }
   }
 
   await deleteAssetsByFootprint(footprintId);

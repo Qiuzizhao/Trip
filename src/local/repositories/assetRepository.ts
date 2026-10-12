@@ -107,6 +107,21 @@ export async function listAssetsByFootprint(footprintId: string) {
     .sort((a, b) => a.position - b.position);
 }
 
+// Reordering a cover changes metadata only; preserve photo IDs and original files.
+export async function reorderAssetsByFootprint(footprintId: string, orderedIds: string[]) {
+  const all = await loadAssets();
+  const current = all.filter((asset) => asset.footprintId === footprintId);
+  const positions = new Map(orderedIds.map((id, index) => [id, index]));
+  if (positions.size !== current.length || orderedIds.length !== current.length || current.some((asset) => !positions.has(asset.id))) {
+    throw new Error('照片列表发生变化，请重新打开足迹。');
+  }
+  await persistAssets(all.map((asset) => {
+    const position = asset.footprintId === footprintId ? positions.get(asset.id) : undefined;
+    if (position === undefined || position === asset.position) return asset;
+    return { ...asset, position, forceSync: true };
+  }));
+}
+
 // 待上传 = 还没有远端对象，且当前没有正在进行的上传。
 // 失败（ERROR）与未开始（IDLE/DONE）都要参与，否则一次失败就永远不会再重试。
 export async function listAssetsNeedingUpload() {
@@ -117,7 +132,7 @@ export async function listAssetsNeedingUpload() {
 export async function listFootprintIdsWithPendingAssets() {
   const ids = new Set<string>();
   for (const asset of await loadAssets()) {
-    if (asset.fetchStatus !== ASSET_DONE || !asset.remoteKey) ids.add(asset.footprintId);
+    if (asset.fetchStatus !== ASSET_DONE || !asset.remoteKey || asset.forceSync) ids.add(asset.footprintId);
   }
   return ids;
 }
@@ -233,6 +248,12 @@ async function patchAsset(assetId: string, patch: Partial<Asset>) {
   const next = { ...target, ...patch };
   await persistAssets([...all.filter((asset) => asset.id !== assetId), next]);
   return next;
+}
+
+export async function markAssetOrderSynced(assetId: string, position: number) {
+  const target = (await loadAssets()).find((asset) => asset.id === assetId);
+  if (!target || target.position !== position) return;
+  await patchAsset(assetId, { forceSync: false });
 }
 
 export async function markAssetUploaded({ assetId, remoteKey }: { assetId: string; remoteKey: string }) {

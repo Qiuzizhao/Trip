@@ -184,6 +184,28 @@ describe('assetMigration', () => {
 });
 
 describe('assetSync', () => {
+  it('选择新首图只重排既有资产，保留照片和远端引用', async () => {
+    seedPickedFile(500);
+    const second = 'file:///tmp/ImagePicker/second.jpg';
+    mockFiles.set(second, 600);
+    const firstAsset = await createAssetFromLocalFile({ footprintId: 'fp-1', position: 0, localUri: PICKED_URI });
+    const secondAsset = await createAssetFromLocalFile({ footprintId: 'fp-1', position: 1, localUri: second });
+    await markAssetUploaded({ assetId: firstAsset.id, remoteKey: `user-1/assets/${firstAsset.id}` });
+    await markAssetUploaded({ assetId: secondAsset.id, remoteKey: `user-1/assets/${secondAsset.id}` });
+    const before = await listAssetsByFootprint('fp-1');
+    const images = await mirrorUrisForFootprint('fp-1');
+    await rebuildAssetsForFootprint('fp-1', [images[1], images[0]]);
+    const after = await listAssetsByFootprint('fp-1');
+    expect(after.map((asset) => asset.id)).toEqual([secondAsset.id, firstAsset.id]);
+    expect(after.map((asset) => asset.position)).toEqual([0, 1]);
+    expect(after[0].remoteKey).toBe(before[1].remoteKey);
+    expect(after[0].blobUpdatedTime).toBe(before[1].blobUpdatedTime);
+    expect(after[0].fileName).toBe(before[1].fileName);
+    expect(after.every((asset) => asset.forceSync)).toBe(true);
+    expect(mockFiles.has(`${ASSETS_DIR}${firstAsset.fileName}`)).toBe(true);
+    expect(mockFiles.has(`${ASSETS_DIR}${secondAsset.fileName}`)).toBe(true);
+  });
+
   it('保存时把本地图片对齐成 asset 并回写镜像路径；重复保存不再改文件名', async () => {
     seedPickedFile(500);
 

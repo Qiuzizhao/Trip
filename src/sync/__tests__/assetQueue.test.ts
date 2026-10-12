@@ -50,8 +50,10 @@ import {
   createAssetFromLocalFile,
   listAllAssets,
   listAssetsByFootprint,
+  markAssetUploaded,
   resetAssetCacheForTests,
 } from '@/src/local/repositories/assetRepository';
+import { rebuildAssetsForFootprint, mirrorUrisForFootprint } from '@/src/local/repositories/assetSync';
 import { runAssetSync } from '@/src/sync/assetQueue';
 import { resetAppSettingsCacheForTests, updateAppSettings } from '@/src/local/repositories/appSettingsRepository';
 import { SupabaseFileApiDriver } from '@/src/sync/supabase/fileApiDriver';
@@ -165,6 +167,35 @@ describe('runAssetSync', () => {
     const [stored] = await listAssetsByFootprint('fp-1');
     expect(stored.remoteKey).toBeNull();
     expect(stored.fetchError).toBeTruthy();
+  });
+
+
+  it('更换首图同步照片顺序，保留资源 ID 且不重复上传图片', async () => {
+    mockFiles.set(PICKED_URI, 1024);
+    const second = 'file:///tmp/ImagePicker/cover-second.jpg';
+    mockFiles.set(second, 1024);
+    const firstAsset = await createAssetFromLocalFile({ footprintId: 'fp-1', position: 0, localUri: PICKED_URI });
+    const secondAsset = await createAssetFromLocalFile({ footprintId: 'fp-1', position: 1, localUri: second });
+    const { fileApi, uploads, rows } = createBackend();
+    await runAssetSync({ fileApi, userId: USER_ID, syncTargetId: SYNC_TARGET_ID });
+    // Begin the cover change with both photos already synchronized.
+    await markAssetUploaded({ assetId: firstAsset.id, remoteKey: `${USER_ID}/assets/${firstAsset.id}` });
+    await markAssetUploaded({ assetId: secondAsset.id, remoteKey: `${USER_ID}/assets/${secondAsset.id}` });
+    const images = await mirrorUrisForFootprint('fp-1');
+    await rebuildAssetsForFootprint('fp-1', [images[1], images[0]]);
+    const result = await runAssetSync({ fileApi, userId: USER_ID, syncTargetId: SYNC_TARGET_ID });
+    expect(result.uploaded).toBe(0);
+    expect(result.published).toBe(2);
+    expect(uploads).toHaveLength(2);
+    const assets = await listAssetsByFootprint('fp-1');
+    expect(assets.map((asset) => asset.id)).toEqual([secondAsset.id, firstAsset.id]);
+    expect(assets.every((asset) => !asset.forceSync)).toBe(true);
+    expect(JSON.parse(rows.get(`${USER_ID}/${secondAsset.id}.md`)!.body!).position).toBe(0);
+    // Existing local pictures must also pick up the order changed on another device.
+    await fileApi.put(`${firstAsset.id}.md`, JSON.stringify({ ...JSON.parse(rows.get(`${USER_ID}/${firstAsset.id}.md`)!.body!), position: 0 }));
+    await fileApi.put(`${secondAsset.id}.md`, JSON.stringify({ ...JSON.parse(rows.get(`${USER_ID}/${secondAsset.id}.md`)!.body!), position: 1 }));
+    await runAssetSync({ fileApi, userId: USER_ID, syncTargetId: SYNC_TARGET_ID });
+    expect((await listAssetsByFootprint('fp-1')).map((asset) => asset.id)).toEqual([firstAsset.id, secondAsset.id]);
   });
 
   it('第二次运行不重复上传（内容未变）', async () => {

@@ -27,7 +27,8 @@ import { Item, ScreenShell } from '../_shared/ReplicatedScreens';
 import { FootprintImagePreviewModal } from './FootprintImagePreviewModal';
 import { FootprintThumbnail } from './FootprintThumbnail';
 import { resolveFootprintImageUris, type PreviewImage } from './assetResolver';
-import { collectTagCounts, itemHasTag, normalizeTags } from './footprintTags';
+import { collectTagCounts, normalizeTags } from './footprintTags';
+import { cityKey, collectCityCounts, filterFootprints } from './footprintCities';
 import { tagColorFor } from './tagColors';
 import { footprintDisplayImageUri, footprintImageUris, prefetchFootprintImages } from './imageCache';
 
@@ -158,6 +159,7 @@ export function FootprintScreen({
   const [items, setItems] = useState<Item[]>(() => getPreloadedData<Item[]>(homePreloadKeys.footprints) ?? []);
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [activeCity, setActiveCity] = useState<string | null>(null);
   const [activeTag, setActiveTag] = useState<string | null>(null);
   const [preview, setPreview] = useState<{ items: PreviewImage[]; index: number } | null>(null);
   const [pendingAssetIds, setPendingAssetIds] = useState<Set<string>>(() => new Set());
@@ -171,20 +173,17 @@ export function FootprintScreen({
     };
   }, [items]);
 
-  const filteredItems = useMemo(() => {
-    const query = searchQuery.trim().toLowerCase();
-    return items.filter((item) => {
-      if (!itemHasTag(item, activeTag)) return false;
-      if (!query) return true;
-      const locationMatch = String(item.location || '').toLowerCase().includes(query);
-      const notesMatch = String(item.notes || '').toLowerCase().includes(query);
-      const cityMatch = String(item.coordinate || '').toLowerCase().includes(query);
-      const tagMatch = normalizeTags(item.tags).some((tag) => tag.toLowerCase().includes(query));
-      return locationMatch || notesMatch || cityMatch || tagMatch;
-    });
-  }, [items, searchQuery, activeTag]);
+  const filteredItems = useMemo(
+    () => filterFootprints(items, { city: activeCity, tag: activeTag, search: searchQuery }),
+    [items, searchQuery, activeTag, activeCity],
+  );
 
   const tagCounts = useMemo(() => collectTagCounts(items), [items]);
+  const cityCounts = useMemo(() => collectCityCounts(items), [items]);
+
+  useEffect(() => {
+    if (activeCity && !cityCounts.some((entry) => cityKey(entry.city) === cityKey(activeCity))) setActiveCity(null);
+  }, [activeCity, cityCounts]);
 
   // 标签在筛选状态下被删掉时，避免留下一个空列表
   useEffect(() => {
@@ -291,7 +290,7 @@ export function FootprintScreen({
               <View style={styles.postcardSearch}>
                 <Ionicons name="search-outline" size={18} color={postcardColors.inkFaint} />
                 <TextInput
-                  placeholder="搜索地点、见闻、标签…"
+                  placeholder="搜索地点、城市、见闻、标签…"
                   placeholderTextColor={postcardColors.inkFaint}
                   value={searchQuery}
                   onChangeText={setSearchQuery}
@@ -305,33 +304,65 @@ export function FootprintScreen({
                 )}
               </View>
 
+              {cityCounts.length ? (
+                <View>
+                  <Text style={styles.postcardFilterLabel}>城市</Text>
+                  <View style={[styles.postcardPills, { marginTop: 6 }]}>
+                    <SpringPill
+                      accessibilityLabel="显示全部城市的足迹"
+                      onPress={() => setActiveCity(null)}
+                      style={[styles.postcardPill, !activeCity && styles.postcardPillSelected]}
+                    >
+                      <Text style={[styles.postcardPillText, !activeCity && styles.postcardPillTextSelected]}>全部城市</Text>
+                    </SpringPill>
+                    {cityCounts.map(({ city, count }) => {
+                      const selected = cityKey(activeCity) === cityKey(city);
+                      return (
+                        <SpringPill
+                          key={cityKey(city)}
+                          accessibilityLabel={`按城市 ${city} 筛选，${count} 条足迹`}
+                          onPress={() => setActiveCity(selected ? null : city)}
+                          style={[styles.postcardPill, selected && styles.postcardPillSelected]}
+                        >
+                          <Ionicons name="location-outline" size={13} color={selected ? '#fff' : postcardColors.skyDeep} />
+                          <Text style={[styles.postcardPillText, selected && styles.postcardPillTextSelected]}>{city} {count}</Text>
+                        </SpringPill>
+                      );
+                    })}
+                  </View>
+                </View>
+              ) : null}
+
               {tagCounts.length ? (
-                <View style={styles.postcardPills}>
-                  <SpringPill
-                    accessibilityLabel="显示全部足迹"
-                    onPress={() => setActiveTag(null)}
-                    style={[styles.postcardPill, !activeTag && styles.postcardPillSelected]}
-                  >
-                    <Text style={[styles.postcardPillText, !activeTag && styles.postcardPillTextSelected]}>
-                      全部 {items.length}
-                    </Text>
-                  </SpringPill>
-                  {tagCounts.map(({ tag, count }) => {
-                    const selected = activeTag === tag;
-                    return (
-                      <SpringPill
-                        key={tag}
-                        accessibilityLabel={`按标签 ${tag} 筛选`}
-                        onPress={() => setActiveTag(selected ? null : tag)}
-                        style={[styles.postcardPill, selected && styles.postcardPillSelected]}
-                      >
-                        <View style={[styles.postcardPillDot, { backgroundColor: tagColorFor(tag).color }]} />
-                        <Text style={[styles.postcardPillText, selected && styles.postcardPillTextSelected]}>
-                          {tag} {count}
-                        </Text>
-                      </SpringPill>
-                    );
-                  })}
+                <View>
+                  {cityCounts.length ? <Text style={styles.postcardFilterLabel}>标签</Text> : null}
+                  <View style={[styles.postcardPills, cityCounts.length > 0 && { marginTop: 6 }]}>
+                    <SpringPill
+                      accessibilityLabel={cityCounts.length ? '显示全部标签的足迹' : '显示全部足迹'}
+                      onPress={() => setActiveTag(null)}
+                      style={[styles.postcardPill, !activeTag && styles.postcardPillSelected]}
+                    >
+                      <Text style={[styles.postcardPillText, !activeTag && styles.postcardPillTextSelected]}>
+                        {cityCounts.length ? '全部标签' : `全部 ${items.length}`}
+                      </Text>
+                    </SpringPill>
+                    {tagCounts.map(({ tag, count }) => {
+                      const selected = activeTag === tag;
+                      return (
+                        <SpringPill
+                          key={tag}
+                          accessibilityLabel={`按标签 ${tag} 筛选`}
+                          onPress={() => setActiveTag(selected ? null : tag)}
+                          style={[styles.postcardPill, selected && styles.postcardPillSelected]}
+                        >
+                          <View style={[styles.postcardPillDot, { backgroundColor: tagColorFor(tag).color }]} />
+                          <Text style={[styles.postcardPillText, selected && styles.postcardPillTextSelected]}>
+                            {tag} {count}
+                          </Text>
+                        </SpringPill>
+                      );
+                    })}
+                  </View>
                 </View>
               ) : null}
 

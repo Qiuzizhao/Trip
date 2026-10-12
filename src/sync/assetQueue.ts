@@ -13,6 +13,7 @@ import {
   markAssetCannotSync,
   markAssetFailed,
   markAssetUploaded,
+  markAssetOrderSynced,
   deleteAssetById,
   upsertAsset,
   type Asset,
@@ -222,14 +223,17 @@ export async function runAssetSync({
     }
   }
 
-  // --- 3) 本地已有 blob 但远端没有元数据 -> 补发布 ---
+  // --- 3) 补发布元数据，以及更新首图调整后的照片顺序 ---
   // 注意：basicDelta 只返回「自上次游标以来变化」的项，不能用来判断存在性，
   // 因此这里对每个资产单独 stat（1 次请求），避免重复发布与无谓的 updated_at 变更。
+  const publishedPositions = new Set<string>();
   for (const asset of await listAllAssets()) {
     if (!asset.remoteKey) continue;
     try {
-      if (await fileApi.stat(`${asset.id}.md`)) continue;
+      if (!asset.forceSync && await fileApi.stat(`${asset.id}.md`)) continue;
       await publishAssetMetadata(fileApi, asset, asset.remoteKey);
+      publishedPositions.add(asset.id);
+      if (asset.forceSync) await markAssetOrderSynced(asset.id, asset.position);
       result.published += 1;
       touch(asset.footprintId);
     } catch (error) {
@@ -248,8 +252,18 @@ export async function runAssetSync({
     onProgress?.(0, remoteAssets.length, 'download');
     for (const metadata of remoteAssets) {
       const local = (await listAllAssets()).find((asset) => asset.id === metadata.id);
+      // Local cover changes take precedence over the delta read before publication.
+      if (local && (local.forceSync || publishedPositions.has(local.id))) {
+        scanned += 1;
+        onProgress?.(scanned, remoteAssets.length, 'download');
+        continue;
+      }
       const localUri = local ? await localUriForAsset(local) : null;
       if (localUri) {
+        if (local && local.position !== metadata.position) {
+          await upsertAsset({ ...local, position: metadata.position });
+          touch(local.footprintId);
+        }
         scanned += 1;
         onProgress?.(scanned, remoteAssets.length, 'download');
         continue;

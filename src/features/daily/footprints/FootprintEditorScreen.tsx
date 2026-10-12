@@ -12,10 +12,13 @@ import { mirrorUrisForFootprint } from '@/src/local/repositories/assetSync';
 import { postcardColors, styles } from '../_shared/styles';
 import { Item, ScreenShell, confirmRemove, today } from '../_shared/ReplicatedScreens';
 import { FootprintImagePreviewModal } from './FootprintImagePreviewModal';
+import { FootprintCoverPicker } from './FootprintCoverPicker';
 import { FootprintThumbnail } from './FootprintThumbnail';
 import { persistFootprintImageUri } from './footprintImageFiles';
 import { collectTagCounts, formatTagsInput, normalizeTags, parseTagInput } from './footprintTags';
 import { readSharedFootprintDraft } from './share/sharedFootprintDraft';
+import { cityKey, collectCityCounts } from './footprintCities';
+import { confirmNewFootprintDate } from './sameDayFootprints';
 import { tagColorFor } from './tagColors';
 import { readTakenAtFromFile, takenAtOptions } from './imageMetadata';
 
@@ -100,11 +103,14 @@ export function FootprintEditorScreen({
   const [loading, setLoading] = useState(Boolean(isEditing || sharedDraftId));
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const saveInFlight = useRef(false);
+  const [choosingCover, setChoosingCover] = useState(false);
   const [previewIndex, setPreviewIndex] = useState<number | null>(null);
   const [tagDraft, setTagDraft] = useState('');
   // uri -> 拍摄时间（毫秒）；读不到记 null，避免重复读同一个文件
   const [takenAtByUri, setTakenAtByUri] = useState<Record<string, number | null>>({});
   const [knownTags, setKnownTags] = useState<string[]>([]);
+  const [knownCities, setKnownCities] = useState<string[]>([]);
   // 「寄出」动画：0 → 1 卡片上移淡出，同时一枚邮戳盖下来
   const sendAnim = useRef(new Animated.Value(0)).current;
   const stampAnim = useRef(new Animated.Value(0)).current;
@@ -134,7 +140,10 @@ export function FootprintEditorScreen({
 
   useEffect(() => {
     void listFootprintsLocal()
-      .then((items) => setKnownTags(collectTagCounts(items).map((entry) => entry.tag)))
+      .then((items) => {
+        setKnownTags(collectTagCounts(items).map((entry) => entry.tag));
+        setKnownCities(collectCityCounts(items).map((entry) => entry.city));
+      })
       .catch(() => undefined);
   }, []);
 
@@ -226,9 +235,12 @@ export function FootprintEditorScreen({
   };
 
   const save = async () => {
-    if (!canSave) return;
+    if (!canSave || saveInFlight.current) return;
+    saveInFlight.current = true;
     setSaving(true);
     try {
+      // Editing an existing footprint does not create another record for the day.
+      if (!isEditing && !(await confirmNewFootprintDate(form.visit_date))) return;
       const imageUrls = imageList(form.image_urls);
       // 记录只写元数据：图片全部由 asset 承担
       const basePayload = {
@@ -262,6 +274,7 @@ export function FootprintEditorScreen({
     } catch (err) {
       Alert.alert('保存失败', err instanceof Error ? err.message : '足迹保存失败，请稍后重试。');
     } finally {
+      saveInFlight.current = false;
       setSaving(false);
     }
   };
@@ -283,13 +296,19 @@ export function FootprintEditorScreen({
   const previewPhoto = (key: string, uri: string, style: any, index: number, overlay?: React.ReactNode) => (
     <Pressable
       key={key}
-      accessibilityLabel="放大足迹照片"
+      accessibilityLabel={index === 0 ? '选择足迹首图' : '放大足迹照片'}
       accessibilityRole="imagebutton"
-      onPress={() => setPreviewIndex(index)}
+      onPress={() => index === 0 ? setChoosingCover(true) : setPreviewIndex(index)}
       style={style}
     >
       <FootprintThumbnail uri={buildAssetUrl(uri) || uri} style={{ height: '100%', width: '100%' }} />
       {overlay}
+      {index === 0 ? (
+        <View pointerEvents="none" style={styles.editCoverHint}>
+          <Ionicons name="images-outline" size={13} color="#fff" />
+          <Text style={styles.editCoverHintText}>更换首图</Text>
+        </View>
+      ) : null}
     </Pressable>
   );
 
@@ -448,6 +467,28 @@ export function FootprintEditorScreen({
                   variant="paper"
                   onChangeText={(value) => setForm((current) => ({ ...current, coordinate: value }))}
                 />
+                {knownCities.length ? (
+                  <>
+                    <Text style={styles.editCityHint}>点选已有城市，也可以输入新城市</Text>
+                    <View style={[styles.pills, { marginTop: 8, marginBottom: 0 }]}>
+                      {knownCities.map((city) => {
+                        const selected = cityKey(city) === cityKey(form.coordinate);
+                        return (
+                          <Pressable
+                            key={cityKey(city)}
+                            accessibilityLabel={`填入城市 ${city}`}
+                            accessibilityRole="button"
+                            accessibilityState={{ selected }}
+                            onPress={() => setForm((current) => ({ ...current, coordinate: city }))}
+                            style={[styles.pill, selected && styles.pillSelected]}
+                          >
+                            <Text style={[styles.pillText, selected && styles.pillTextSelected]}>{city}</Text>
+                          </Pressable>
+                        );
+                      })}
+                    </View>
+                  </>
+                ) : null}
               </View>
               <View style={styles.editGroupDivider} />
 
@@ -567,13 +608,18 @@ export function FootprintEditorScreen({
                   {images.map((uri, index) => (
                     <View key={`${uri}-${index}`} style={styles.editThumb}>
                       <Pressable
-                        accessibilityLabel="放大足迹照片"
+                        accessibilityLabel={index === 0 ? '选择足迹首图' : '放大足迹照片'}
                         accessibilityRole="imagebutton"
-                        onPress={() => setPreviewIndex(index)}
+                        onPress={() => index === 0 ? setChoosingCover(true) : setPreviewIndex(index)}
                         style={{ flex: 1 }}
                       >
                         <FootprintThumbnail uri={buildAssetUrl(uri) || uri} style={{ height: '100%', width: '100%' }} />
                       </Pressable>
+                      {index === 0 ? (
+                        <View pointerEvents="none" style={styles.editCoverBadge}>
+                          <Text style={styles.editCoverHintText}>首图</Text>
+                        </View>
+                      ) : null}
                       <Pressable
                         accessibilityLabel="移除照片"
                         accessibilityRole="button"
@@ -626,6 +672,15 @@ export function FootprintEditorScreen({
           </>
         ) : null}
       </ScrollView>
+      <FootprintCoverPicker
+        visible={choosingCover}
+        images={images}
+        onClose={() => setChoosingCover(false)}
+        onSelect={(uri) => {
+          setForm((current) => ({ ...current, image_urls: [uri, ...current.image_urls.filter((image) => image !== uri)] }));
+          setChoosingCover(false);
+        }}
+      />
       <FootprintImagePreviewModal
         initialIndex={previewIndex ?? 0}
         items={previewIndex === null ? [] : previewItems}

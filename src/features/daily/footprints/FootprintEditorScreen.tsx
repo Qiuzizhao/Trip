@@ -154,16 +154,19 @@ export function FootprintEditorScreen({
     if (!pending.length) return;
 
     let cancelled = false;
-    void Promise.all(
-      pending.map(async (uri) => [uri, await readTakenAtFromFile(uri).catch(() => null)] as const),
-    ).then((entries) => {
+    void (async () => {
+      const entries: Array<readonly [string, number | null]> = [];
+      for (const uri of pending) {
+        if (cancelled) return;
+        entries.push([uri, await readTakenAtFromFile(uri).catch(() => null)]);
+      }
       if (cancelled) return;
       setTakenAtByUri((current) => {
         const next = { ...current };
         for (const [uri, takenAt] of entries) next[uri] = takenAt;
         return next;
       });
-    });
+    })();
 
     return () => {
       cancelled = true;

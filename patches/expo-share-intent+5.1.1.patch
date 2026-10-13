@@ -1,0 +1,166 @@
+diff --git a/node_modules/expo-share-intent/build/useShareIntent.js b/node_modules/expo-share-intent/build/useShareIntent.js
+index 1ab12c4..18437d4 100644
+--- a/node_modules/expo-share-intent/build/useShareIntent.js
++++ b/node_modules/expo-share-intent/build/useShareIntent.js
+@@ -39,10 +39,10 @@ export default function useShareIntent(options = SHAREINTENT_OPTIONS_DEFAULT) {
+         options.debug && console.debug("useShareIntent[refresh]", url);
+         if (url?.includes(`${getScheme(options)}://dataUrl=`)) {
+             // iOS only
+-            ExpoShareIntentModule?.getShareIntent(url);
++            ExpoShareIntentModule?.getShareIntent(url)?.catch(() => setError("Cannot read shared images"));
+         }
+         else if (Platform.OS === "android") {
+-            ExpoShareIntentModule?.getShareIntent("");
++            ExpoShareIntentModule?.getShareIntent("")?.catch(() => setError("Cannot read shared files"));
+         }
+         else if (Platform.OS === "ios") {
+             options.debug &&
+diff --git a/node_modules/expo-share-intent/ios/ExpoShareIntentModule.swift b/node_modules/expo-share-intent/ios/ExpoShareIntentModule.swift
+index e52b6d0..31c1b2e 100644
+--- a/node_modules/expo-share-intent/ios/ExpoShareIntentModule.swift
++++ b/node_modules/expo-share-intent/ios/ExpoShareIntentModule.swift
+@@ -7,6 +7,7 @@
+ import ExpoModulesCore
+ import Foundation
+ import Photos
++import ImageIO
+ 
+ public class ExpoShareIntentModule: Module {
+     // Each module class must implement the definition function. The definition consists of components
+@@ -25,7 +26,7 @@ public class ExpoShareIntentModule: Module {
+         AsyncFunction("getShareIntent") { (url: String) in
+             let fileUrl = URL(string: url)
+             let json = handleUrl(url: fileUrl)
+-            if json != "error" && json != "empty" {
++            if let json, json != "error" && json != "empty" {
+                 self.sendEvent(
+                     "onChange",
+                     [
+@@ -34,6 +35,32 @@ public class ExpoShareIntentModule: Module {
+             }
+         }
+ 
++        // Read only ImageIO properties, without sending whole HEIC/JPEG files into JS.
++        AsyncFunction("readImageDateMetadata") { (uri: String) -> [String: String]? in
++            return autoreleasepool {
++                guard let url = URL(string: uri), url.isFileURL else { return nil }
++                let options = [kCGImageSourceShouldCache: false] as CFDictionary
++                guard let source = CGImageSourceCreateWithURL(url as CFURL, options),
++                    let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, options) as? NSDictionary
++                else { return nil }
++                let exif = properties[kCGImagePropertyExifDictionary] as? NSDictionary ?? NSDictionary()
++                let tiff = properties[kCGImagePropertyTIFFDictionary] as? NSDictionary ?? NSDictionary()
++                let dates: [(CFString, CFString)] = [
++                    (kCGImagePropertyExifDateTimeOriginal, kCGImagePropertyExifOffsetTimeOriginal),
++                    (kCGImagePropertyExifDateTimeDigitized, kCGImagePropertyExifOffsetTimeDigitized)
++                ]
++                for (dateKey, offsetKey) in dates {
++                    if let date = exif[dateKey] as? String {
++                        return ["dateTime": date, "offset": exif[offsetKey] as? String ?? exif[kCGImagePropertyExifOffsetTime] as? String ?? ""]
++                    }
++                }
++                if let date = tiff[kCGImagePropertyTIFFDateTime] as? String {
++                    return ["dateTime": date, "offset": ""]
++                }
++                return nil
++            }
++        }
++
+         Function("clearShareIntent") { (sharedKey: String) in
+             let appGroupIdentifier = self.getAppGroupIdentifier()
+             let userDefaults = UserDefaults(suiteName: appGroupIdentifier)
+@@ -56,12 +83,19 @@ public class ExpoShareIntentModule: Module {
+     private func handleUrl(url: URL?) -> String? {
+         let appGroupIdentifier = self.getAppGroupIdentifier()
+         NSLog("HandleUrl \(String(describing: url)) \(String(describing: appGroupIdentifier))")
++        guard url?.fragment != nil else {
++            self.sendEvent("onError", ["value": "Invalid share URL"])
++            return "error"
++        }
+         if let url = url {
+             let userDefaults = UserDefaults(suiteName: appGroupIdentifier)
+             if url.fragment == "media" {
+                 if let key = url.host?.components(separatedBy: "=").last {
+                     if let json = userDefaults?.object(forKey: key) as? Data {
+-                        let sharedArray = decodeMedia(data: json)
++                        guard let sharedArray = decodeMedia(data: json) else {
++                            self.sendEvent("onError", ["value": "Invalid shared image data"])
++                            return "error"
++                        }
+                         let sharedMediaFiles: [SharedMediaFile] = sharedArray.compactMap {
+                             if let path = getAbsolutePath(for: $0.path) {
+                                 if $0.type == .video && $0.thumbnail != nil {
+@@ -92,7 +126,10 @@ public class ExpoShareIntentModule: Module {
+             } else if url.fragment == "file" {
+                 if let key = url.host?.components(separatedBy: "=").last {
+                     if let json = userDefaults?.object(forKey: key) as? Data {
+-                        let sharedArray = decodeMedia(data: json)
++                        guard let sharedArray = decodeMedia(data: json) else {
++                            self.sendEvent("onError", ["value": "Invalid shared image data"])
++                            return "error"
++                        }
+                         let sharedMediaFiles: [SharedMediaFile] = sharedArray.compactMap {
+                             if let path = getAbsolutePath(for: $0.path) {
+                                 return SharedMediaFile.init(
+@@ -111,7 +148,10 @@ public class ExpoShareIntentModule: Module {
+             } else if url.fragment == "weburl" {
+                 if let key = url.host?.components(separatedBy: "=").last {
+                     if let json = userDefaults?.object(forKey: key) as? Data {
+-                        let sharedArray = decodeWebUrl(data: json)
++                        guard let sharedArray = decodeWebUrl(data: json) else {
++                            self.sendEvent("onError", ["value": "Invalid shared URL data"])
++                            return "error"
++                        }
+                         let sharedWebUrls: [WebUrl] = sharedArray.compactMap {
+                             return WebUrl.init(url: $0.url, meta: $0.meta)
+                         }
+@@ -203,31 +243,16 @@ public class ExpoShareIntentModule: Module {
+         return url
+     }
+ 
+-    private func decodeMedia(data: Data) -> [SharedMediaFile] {
+-        let encodedData = try? JSONDecoder().decode([SharedMediaFile].self, from: data)
+-        return encodedData!
++    private func decodeMedia(data: Data) -> [SharedMediaFile]? {
++        return try? JSONDecoder().decode([SharedMediaFile].self, from: data)
+     }
+-    private func decodeWebUrl(data: Data) -> [WebUrl] {
+-        let encodedData = try? JSONDecoder().decode([WebUrl].self, from: data)
+-        return encodedData!
+-    }
+-
+-    private func toJson(data: [SharedMediaFile]?) -> String? {
+-        if data == nil {
+-            return nil
+-        }
+-        let encodedData = try? JSONEncoder().encode(data)
+-        let json = String(data: encodedData!, encoding: .utf8)!
+-        return json
++    private func decodeWebUrl(data: Data) -> [WebUrl]? {
++        return try? JSONDecoder().decode([WebUrl].self, from: data)
+     }
+ 
+-    private func toJson(data: [WebUrl]?) -> String? {
+-        if data == nil {
+-            return nil
+-        }
+-        let encodedData = try? JSONEncoder().encode(data)
+-        let json = String(data: encodedData!, encoding: .utf8)!
+-        return json
++    private func toJson<T: Encodable>(data: T?) -> String? {
++        guard let data, let encoded = try? JSONEncoder().encode(data) else { return nil }
++        return String(data: encoded, encoding: .utf8)
+     }
+ 
+     struct ShareIntentText: Codable {
+@@ -286,8 +311,7 @@ public class ExpoShareIntentModule: Module {
+ 
+ extension Encodable {
+     func toJSON() throws -> String? {
+-        let jsonData = try? JSONEncoder().encode(self)
+-        let jsonString = String(data: jsonData!, encoding: .utf8)
+-        return jsonString
++        let jsonData = try JSONEncoder().encode(self)
++        return String(data: jsonData, encoding: .utf8)
+     }
+ }

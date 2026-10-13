@@ -4,6 +4,15 @@
 // exifr 会报 "Unknown file format"，exifreader 能正常解析（实测同一批文件）。
 // 另外 exifreader 支持 HEIC/HEIF/JPEG/PNG 等多种容器。
 import ExifReader from 'exifreader';
+import { requireOptionalNativeModule } from 'expo-modules-core';
+import { Platform } from 'react-native';
+
+const metadataModule = requireOptionalNativeModule<{
+  readImageDateMetadata?: (uri: string) => Promise<{ dateTime: string; offset: string } | null>;
+}>('ExpoShareIntentModule');
+
+export const MAX_METADATA_FALLBACK_BYTES = 16 * 1024 * 1024;
+let metadataQueue: Promise<unknown> = Promise.resolve();
 
 /** 把 EXIF 的 "2026:09:05 17:56:07" + "+08:00" 解析成毫秒时间戳；解析失败返回 null */
 export function parseExifDateTime(dateTime?: string | null, offset?: string | null): number | null {
@@ -52,36 +61,41 @@ export function readTakenAtFromBytes(buffer: ArrayBuffer): number | null {
   }
 }
 
-/**
- * 读本地文件字节。
- * 主路径用 expo-file-system 的 File.arrayBuffer()（原生读文件，稳定）；
- * 失败时退回 fetch(uri)（远端 http 图或沙盒差异时兜底）。
- */
+// iOS uses ImageIO properties without transferring original photo bytes to JS.
+// On other platforms / an older native binary, keep the fallback bounded.
 async function readImageBytes(uri: string): Promise<ArrayBuffer | null> {
-  if (uri.startsWith('file://')) {
-    try {
-      const { File } = await import('expo-file-system');
-      const buffer = await new File(uri).arrayBuffer();
-      if (buffer?.byteLength) return buffer;
-    } catch {
-      // 落到 fetch 兜底
-    }
-  }
-
+  if (!uri.startsWith('file://')) return null;
   try {
-    const response = await fetch(uri);
-    const buffer = await response.arrayBuffer();
-    return buffer?.byteLength ? buffer : null;
+    const { File } = await import('expo-file-system');
+    const file = new File(uri);
+    if (!file.size || file.size > MAX_METADATA_FALLBACK_BYTES) return null;
+    const buffer = await file.arrayBuffer();
+    return buffer?.byteLength && buffer.byteLength <= MAX_METADATA_FALLBACK_BYTES ? buffer : null;
   } catch {
     return null;
   }
 }
 
-/** 从本地文件读拍摄时间（只读元数据，不上传、不落盘） */
-export async function readTakenAtFromFile(uri: string): Promise<number | null> {
+async function readTakenAt(uri: string): Promise<number | null> {
+  if (!uri.startsWith('file://')) return null;
+  if (Platform.OS === 'ios' && metadataModule?.readImageDateMetadata) {
+    try {
+      const metadata = await metadataModule.readImageDateMetadata(uri);
+      return metadata ? parseExifDateTime(metadata.dateTime, metadata.offset) : null;
+    } catch {
+      // Metadata is optional. Never fall back to reading an entire large original.
+      return null;
+    }
+  }
   const buffer = await readImageBytes(uri);
-  if (!buffer) return null;
-  return readTakenAtFromBytes(buffer);
+  return buffer ? readTakenAtFromBytes(buffer) : null;
+}
+
+/** Serialize metadata reads across the editor and album to bound peak memory. */
+export function readTakenAtFromFile(uri: string): Promise<number | null> {
+  const result = metadataQueue.then(() => readTakenAt(uri));
+  metadataQueue = result.then(() => undefined, () => undefined);
+  return result;
 }
 
 /** 展示用格式：2026年9月5日 17:56 */

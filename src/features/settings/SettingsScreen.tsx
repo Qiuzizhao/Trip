@@ -70,7 +70,7 @@ export function SettingsScreen() {
             />
           </View>
           {Platform.OS === 'ios' && <Pressable
-            accessibilityLabel="Trip 系统相簿，点击补存或重试"
+            accessibilityLabel="Trip 系统相簿，点击补存未完成的照片"
             disabled={album.phase === 'syncing'}
             onPress={() => {
               if (album.permission && ['denied', 'limited', 'restricted'].includes(album.permission)) {
@@ -88,9 +88,22 @@ export function SettingsScreen() {
                 album.phase === 'syncing' ? `正在补存照片 ${album.completed} / ${album.total}`
                   : album.phase === 'permission' ? '请在系统设置中允许完整访问照片，自动补存新旧照片'
                   : album.phase === 'error' ? `${album.failed} 张照片未保存，点击重试`
-                  : album.phase === 'done' ? `已保存 ${album.completed} 张照片，点击重新检查`
+                  : album.phase === 'done' ? `已完成 ${album.completed} 张照片的保存检查`
                   : '新旧足迹照片自动存入系统相册的 Trip 相簿，点击补存'
               }</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={19} color={colors.muted} />
+          </Pressable>}
+          {Platform.OS === 'ios' && <Pressable
+            onPress={() => router.push('/settings/photo-cleanup' as never)}
+            style={({ pressed }) => [styles.settingRow, pressed && styles.cardPressed]}
+          >
+            <View style={styles.settingIconWrap}>
+              <Ionicons name="copy-outline" size={22} color={themeColors.primary} />
+            </View>
+            <View style={styles.settingRowText}>
+              <Text style={styles.helperTitle}>清理 Trip 重复照片</Text>
+              <Text style={styles.helperText}>先预览重复副本，确认后再删除</Text>
             </View>
             <Ionicons name="chevron-forward" size={19} color={colors.muted} />
           </Pressable>}

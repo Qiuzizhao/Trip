@@ -7,8 +7,26 @@ import UniformTypeIdentifiers
 public class TripPhotoAlbumModule: Module {
   private let queue = DispatchQueue(label: "com.trip.photo-album", qos: .utility)
 
+  private lazy var ledger = AlbumSaveLedger(url: FileManager.default.urls(for: .applicationSupportDirectory,
+    in: .userDomainMask)[0].appendingPathComponent("trip-photo-album/saved.json"))
+
+  private let scanCancellation = AlbumScanCancellation()
+  private lazy var duplicateCleaner = AlbumDuplicateCleaner(cancellation: scanCancellation)
+
   public func definition() -> ModuleDefinition {
     Name("TripPhotoAlbum")
+    Events("duplicateScanProgress")
+    Function("cancelDuplicateScan") { self.scanCancellation.set(true) }
+    AsyncFunction("findDuplicates") { () -> [String: Any] in
+      try self.requirePermission()
+      return try self.duplicateCleaner.scan(ownedIDs: self.ledger.assetIdentifiers) { scanned, total in
+        self.sendEvent("duplicateScanProgress", ["scanned": scanned, "total": total])
+      }
+    }.runOnQueue(queue)
+    AsyncFunction("deleteDuplicates") { (token: String) -> Int in
+      try self.requirePermission()
+      return try self.duplicateCleaner.remove(token: token)
+    }.runOnQueue(queue)
 
     AsyncFunction("permission") { (request: Bool, promise: Promise) in
       let status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
@@ -21,19 +39,29 @@ public class TripPhotoAlbumModule: Module {
       }
     }
 
+    AsyncFunction("rememberSavedHashes") { (hashes: [String]) in
+      try self.ledger.remember(hashes.filter { $0.count == 64 && $0.allSatisfy(\.isHexDigit) })
+    }.runOnQueue(queue)
+
     AsyncFunction("snapshot") { () -> [String] in
       try self.requirePermission()
-      guard let album = self.findAlbum() else { return [] }
-      var hashes = Set<String>()
-      PHAsset.fetchAssets(in: album, options: nil).enumerateObjects { asset, _, _ in
-        for resource in PHAssetResource.assetResources(for: asset) {
-          let name = resource.originalFilename
-          if name.hasPrefix("trip-") {
-            let hash = String(name.dropFirst(5).split(separator: ".").first ?? "")
-            if hash.count == 64 { hashes.insert(hash) }
+      var hashes = self.ledger.hashes
+      let options = PHFetchOptions()
+      options.predicate = NSPredicate(format: "title = %@", "Trip")
+      // Same-title albums can exist after iCloud reconciliation. Inspect every matching album.
+      PHAssetCollection.fetchAssetCollections(with: .album, subtype: .albumRegular, options: options)
+        .enumerateObjects { album, _, _ in
+          PHAsset.fetchAssets(in: album, options: nil).enumerateObjects { asset, _, _ in
+            for resource in PHAssetResource.assetResources(for: asset) {
+              let name = resource.originalFilename.lowercased()
+              if name.hasPrefix("trip-") {
+                let hash = String(name.dropFirst(5).split(separator: ".").first ?? "")
+                if hash.count == 64 && hash.allSatisfy(\.isHexDigit) { hashes.insert(hash) }
+              }
+            }
           }
         }
-      }
+      try self.ledger.remember(Array(hashes))
       return Array(hashes)
     }.runOnQueue(queue)
 
@@ -51,43 +79,42 @@ public class TripPhotoAlbumModule: Module {
       return hasher.finalize().map { String(format: "%02x", $0) }.joined()
     }.runOnQueue(queue)
 
-    AsyncFunction("save") { (uri: String, hash: String, promise: Promise) in
-      do {
-        try self.requirePermission()
-        let url = try self.fileURL(uri)
-        guard hash.count == 64 && hash.allSatisfy({ $0.isHexDigit }) else {
-          throw AlbumError.invalidFile
+    AsyncFunction("save") { (uri: String, hash: String) -> Bool in
+      guard hash.count == 64 && hash.allSatisfy(\.isHexDigit) else { throw AlbumError.invalidFile }
+      // The native boundary also enforces idempotency. Never rely on a Photos filename
+      // being immediately visible (in particular for HEIF/HEIC and iCloud resources).
+      if self.ledger.contains(hash) { return true }
+      try self.requirePermission()
+      let url = try self.fileURL(uri)
+      guard let imageSource = CGImageSourceCreateWithURL(url as CFURL,
+        [kCGImageSourceShouldCache: false] as CFDictionary),
+        let imageType = CGImageSourceGetType(imageSource) else { throw AlbumError.invalidFile }
+      let typeIdentifier = imageType as String
+      let ext = UTType(typeIdentifier)?.preferredFilenameExtension ?? url.pathExtension
+      let existingAlbum = self.findAlbum()
+      var identifier: String?
+      // Block only this utility queue until commit; concurrent save calls cannot both create.
+      try PHPhotoLibrary.shared().performChangesAndWait {
+        let asset = PHAssetCreationRequest.forAsset()
+        let options = PHAssetResourceCreationOptions()
+        options.uniformTypeIdentifier = typeIdentifier
+        options.originalFilename = "trip-\(hash).\(ext.isEmpty ? "jpg" : ext)"
+        asset.addResource(with: .photo, fileURL: url, options: options)
+        let albumRequest: PHAssetCollectionChangeRequest?
+        if let album = existingAlbum {
+          albumRequest = PHAssetCollectionChangeRequest(for: album)
+        } else {
+          albumRequest = PHAssetCollectionChangeRequest.creationRequestForAssetCollection(withTitle: "Trip")
         }
-        // Remote object URLs can omit the extension. Read the file header, without decoding pixels.
-        guard let imageSource = CGImageSourceCreateWithURL(url as CFURL,
-          [kCGImageSourceShouldCache: false] as CFDictionary),
-          let imageType = CGImageSourceGetType(imageSource) else { throw AlbumError.invalidFile }
-        let typeIdentifier = imageType as String
-        let ext = UTType(typeIdentifier)?.preferredFilenameExtension ?? url.pathExtension
-        let existingAlbum = self.findAlbum()
-        PHPhotoLibrary.shared().performChanges({
-          let asset = PHAssetCreationRequest.forAsset()
-          let options = PHAssetResourceCreationOptions()
-          options.uniformTypeIdentifier = typeIdentifier
-          options.originalFilename = "trip-\(hash).\(ext.isEmpty ? "jpg" : ext)"
-          asset.addResource(with: .photo, fileURL: url, options: options)
-          // Album + photo insertion is a single Photos transaction, including first creation.
-          let albumRequest: PHAssetCollectionChangeRequest?
-          if let album = existingAlbum {
-            albumRequest = PHAssetCollectionChangeRequest(for: album)
-          } else {
-            albumRequest = PHAssetCollectionChangeRequest.creationRequestForAssetCollection(withTitle: "Trip")
-          }
-          if let placeholder = asset.placeholderForCreatedAsset {
-            albumRequest?.addAssets([placeholder] as NSArray)
-          }
-        }) { success, error in
-          if success { promise.resolve(true) }
-          else { promise.reject("ERR_PHOTO_ALBUM", error?.localizedDescription ?? "无法保存照片") }
+        if let placeholder = asset.placeholderForCreatedAsset {
+          identifier = placeholder.localIdentifier
+          albumRequest?.addAssets([placeholder] as NSArray)
         }
-      } catch {
-        promise.reject("ERR_PHOTO_ALBUM", error.localizedDescription)
       }
+      guard let identifier = identifier else { throw AlbumError.invalidFile }
+      // Persist the Photos identifier before acknowledging success to JS.
+      try self.ledger.record(hash, assetIdentifier: identifier)
+      return true
     }.runOnQueue(queue)
   }
 

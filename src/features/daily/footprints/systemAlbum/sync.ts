@@ -28,9 +28,11 @@ function publish(patch: Partial<AlbumState>) {
 }
 
 const manifestKey = 'trip.system-photo-album.hashes.v1';
+const receiptsKey = 'trip.system-photo-album.receipts.v2';
 type Source = { key: string; resolve: () => Promise<string | null> };
 let running: Promise<void> | null = null;
 let rerun = false;
+let pauseDepth = 0;
 let timer: ReturnType<typeof setTimeout> | undefined;
 
 async function sources(): Promise<Source[]> {
@@ -57,24 +59,40 @@ async function sync(requestPermission: boolean) {
   const native = photoAlbumNative;
   if (!native) return;
   const items = await sources();
-  publish({ total: items.length, completed: 0, failed: 0 });
-  if (!items.length) { publish({ phase: 'done' }); return; }
+  if (!items.length) { publish({ phase: 'done', total: 0, completed: 0, failed: 0 }); return; }
   // Only the OS's first prompt is automatic; denied/limited access is handled in Settings.
+  const manifest = await getJson<Record<string, string>>(manifestKey, {});
+  const receipts = await getJson<string[]>(receiptsKey, []);
+  // A committed save is authoritative even if Photos cannot currently enumerate its
+  // original filename. Migrate v1 acknowledgements before considering any new writes.
+  const hashes = new Set([...receipts, ...Object.values(manifest)]);
+  if (hashes.size !== new Set(receipts).size) {
+    await native.rememberSavedHashes?.(Array.from(hashes));
+    await setJson(receiptsKey, Array.from(hashes));
+  }
+  const acknowledged = (item: Source) => manifest[item.key];
+  if (items.every((item) => acknowledged(item))) {
+    publish({ phase: 'done', total: items.length, completed: items.length, failed: 0 });
+    return;
+  }
+  publish({ total: items.length, completed: 0, failed: 0 });
   const permission = await native.permission(requestPermission);
   publish({ permission });
   if (permission !== 'authorized') { publish({ phase: 'permission' }); return; }
   publish({ phase: 'syncing' });
-  const hashes = new Set(await native.snapshot());
-  const manifest = await getJson<Record<string, string>>(manifestKey, {});
+  await setJson(receiptsKey, Array.from(hashes));
+  await native.rememberSavedHashes?.(Array.from(hashes));
+  for (const hash of await native.snapshot()) hashes.add(hash);
+  await setJson(receiptsKey, Array.from(hashes));
   const nextManifest: Record<string, string> = {};
   let failed = 0;
   let completed = 0;
   for (const item of items) {
-    if (AppState.currentState !== 'active') break;
+    if (AppState.currentState !== 'active' || pauseDepth > 0) break;
     let temporary: string | null = null;
     try {
       const previousHash = manifest[item.key];
-      if (previousHash && hashes.has(previousHash)) {
+      if (previousHash) {
         nextManifest[item.key] = previousHash;
       } else {
         let uri = await item.resolve();
@@ -93,6 +111,7 @@ async function sync(requestPermission: boolean) {
         if (!hashes.has(hash)) {
           await native.save(uri, hash);
           hashes.add(hash);
+          await setJson(receiptsKey, Array.from(hashes));
         }
         nextManifest[item.key] = hash;
         // Checkpoint every photo; interrupted exports resume without creating duplicate assets.
@@ -106,13 +125,12 @@ async function sync(requestPermission: boolean) {
     }
     publish({ completed, failed });
   }
-  // Keep untouched checkpoints when backgrounded. A complete pass discards stale source keys.
-  await setJson(manifestKey, completed + failed === items.length ? nextManifest : { ...manifest, ...nextManifest });
+  await setJson(manifestKey, { ...manifest, ...nextManifest });
   publish({ phase: failed ? 'error' : completed === items.length ? 'done' : 'idle', completed, failed });
 }
 
 export function syncSystemAlbum(requestPermission = true): Promise<void> {
-  if (!photoAlbumNative) return Promise.resolve();
+  if (!photoAlbumNative || pauseDepth > 0) return Promise.resolve();
   if (running) { rerun = true; return running; }
   running = sync(requestPermission).catch(() => {
     publish({ phase: 'error', failed: Math.max(1, state.failed) });
@@ -124,6 +142,7 @@ export function syncSystemAlbum(requestPermission = true): Promise<void> {
 }
 function schedule() {
   clearTimeout(timer);
+  if (pauseDepth > 0) return;
   timer = setTimeout(() => {
     if (AppState.currentState === 'active') void syncSystemAlbum();
   }, 1500);
@@ -131,8 +150,17 @@ function schedule() {
 
 export function startSystemAlbumSync() {
   if (!photoAlbumNative) return () => {};
-  const unsubscribeAssets = subscribeAssetsLocal(schedule);
-  const unsubscribeFootprints = subscribeFootprintsLocal(schedule);
+  let assetSignature: string | undefined;
+  let recordSignature: string | undefined;
+  const unsubscribeAssets = subscribeAssetsLocal((assets) => {
+    const next = assets.map((asset) => `${asset.footprintId}:${asset.id}:${asset.fileName}`).sort().join('|');
+    if (assetSignature !== next) { assetSignature = next; schedule(); }
+  });
+  const unsubscribeFootprints = subscribeFootprintsLocal((records) => {
+    const next = records.map((record) => JSON.stringify([record.id, record.deleted_at,
+      record.image_urls ?? record.image_url ?? null])).sort().join('|');
+    if (recordSignature !== next) { recordSignature = next; schedule(); }
+  });
   const appState = AppState.addEventListener('change', (next) => { if (next === 'active') schedule(); });
   schedule();
   return () => {
@@ -140,5 +168,19 @@ export function startSystemAlbumSync() {
     unsubscribeAssets();
     unsubscribeFootprints();
     appState.remove();
+  };
+}
+
+
+// A duplicate preview must stay stable while the user reviews and confirms it.
+export function pauseSystemAlbumSync() {
+  pauseDepth += 1;
+  clearTimeout(timer);
+  let resumed = false;
+  return () => {
+    if (resumed) return;
+    resumed = true;
+    pauseDepth = Math.max(0, pauseDepth - 1);
+    if (!pauseDepth) schedule();
   };
 }

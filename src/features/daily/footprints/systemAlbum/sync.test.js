@@ -8,7 +8,7 @@ import { photoAlbumNative } from './native';
 import { getSystemAlbumState, startSystemAlbumSync, syncSystemAlbum } from './sync';
 
 jest.mock('./native', () => ({ photoAlbumNative: {
-  permission: jest.fn(), snapshot: jest.fn(), hashFile: jest.fn(), save: jest.fn(),
+  permission: jest.fn(), rememberSavedHashes: jest.fn(), snapshot: jest.fn(), hashFile: jest.fn(), save: jest.fn(),
 } }));
 jest.mock('@/src/local/repositories/assetRepository', () => ({ listAllAssets: jest.fn(), subscribeAssetsLocal: jest.fn() }));
 jest.mock('@/src/local/repositories/footprintsRepository', () => ({ listFootprintsLocal: jest.fn(), subscribeFootprintsLocal: jest.fn() }));
@@ -27,7 +27,9 @@ beforeEach(() => {
   mock(listFootprintsLocal).mockResolvedValue([{ id: 'old' }]);
   mock(listAllAssets).mockResolvedValue([{ id: 'one', footprintId: 'old', blobUpdatedTime: 1 }]);
   mock(resolveAssetUri).mockResolvedValue('file:///photos/one.heic');
-  mock(getJson).mockResolvedValue({});
+  const stored = new Map();
+  mock(getJson).mockImplementation(async (key, fallback) => stored.has(key) ? stored.get(key) : fallback);
+  mock(setJson).mockImplementation(async (key, value) => { stored.set(key, value); });
   mock(native.permission).mockResolvedValue('authorized');
   mock(native.snapshot).mockResolvedValue([]);
   mock(native.hashFile).mockResolvedValue('hash-one');
@@ -63,14 +65,27 @@ test('a Photos transaction completed before app interruption is found by content
   expect(setJson).toHaveBeenCalled();
 });
 
-test('checkpoint plus existing album skips original download; deleted album is restored', async () => {
-  mock(getJson).mockResolvedValue({ 'asset:one:1': 'hash-one' });
-  mock(native.snapshot).mockResolvedValue(['hash-one']);
-  await syncSystemAlbum();
-  expect(resolveAssetUri).not.toHaveBeenCalled();
+test('HEIF successful receipts prevent repeat writes when Photos returns no original filenames', async () => {
+  mock(getJson).mockImplementation(async (key, fallback) => key.endsWith('hashes.v1')
+    ? { 'asset:one:1': 'hash-one' } : fallback);
   mock(native.snapshot).mockResolvedValue([]);
   await syncSystemAlbum();
+  await syncSystemAlbum();
+  await syncSystemAlbum();
+  expect(native.snapshot).not.toHaveBeenCalled();
+  expect(native.hashFile).not.toHaveBeenCalled();
+  expect(native.save).not.toHaveBeenCalled();
+});
+
+test('HEIF resource rename and source ID changes keep content receipts across retries', async () => {
+  await syncSystemAlbum();
   expect(native.save).toHaveBeenCalledTimes(1);
+  mock(listAllAssets).mockResolvedValue([{ id: 'renamed', footprintId: 'old', blobUpdatedTime: 99 }]);
+  mock(native.snapshot).mockResolvedValue([]);
+  await syncSystemAlbum();
+  await syncSystemAlbum();
+  expect(native.save).toHaveBeenCalledTimes(1);
+  expect(native.rememberSavedHashes).toHaveBeenCalledWith(['hash-one']);
 });
 
 test('denied and limited access never write photos', async () => {
@@ -107,8 +122,37 @@ test('saved photo changes trigger automatic export, while orphaned drafts are ig
     expect(native.permission).not.toHaveBeenCalled();
     expect(native.save).not.toHaveBeenCalled();
     mock(listFootprintsLocal).mockResolvedValue([{ id: 'old' }]);
-    mock(subscribeAssetsLocal).mock.calls[0][0]();
+    mock(subscribeAssetsLocal).mock.calls[0][0]([{ id: 'one', footprintId: 'old', fileName: 'one.heif' }]);
     await jest.advanceTimersByTimeAsync(1500);
+    expect(native.save).toHaveBeenCalledTimes(1);
+  } finally { stop(); jest.useRealTimers(); }
+});
+
+
+test('opening settings subscribes to status without scheduling a new scan', () => {
+  const { subscribeSystemAlbum } = require('./sync');
+  const stop = subscribeSystemAlbum(jest.fn());
+  expect(native.permission).not.toHaveBeenCalled();
+  expect(native.snapshot).not.toHaveBeenCalled();
+  expect(native.save).not.toHaveBeenCalled();
+  stop();
+});
+
+test('metadata, upload completion, and cover reordering do not restart album scanning', async () => {
+  jest.useFakeTimers();
+  jest.spyOn(AppState, 'addEventListener').mockReturnValue({ remove: jest.fn() });
+  mock(subscribeAssetsLocal).mockReturnValue(jest.fn());
+  mock(subscribeFootprintsLocal).mockReturnValue(jest.fn());
+  const stop = startSystemAlbumSync();
+  try {
+    const event = mock(subscribeAssetsLocal).mock.calls[0][0];
+    const asset = { id: 'one', footprintId: 'old', fileName: 'one.heif', position: 0 };
+    event([asset]);
+    await jest.advanceTimersByTimeAsync(1500);
+    const scans = native.snapshot.mock.calls.length;
+    event([{ ...asset, position: 1, takenAt: 100, syncTime: 200, fetchStatus: 2 }]);
+    await jest.advanceTimersByTimeAsync(1500);
+    expect(native.snapshot).toHaveBeenCalledTimes(scans);
     expect(native.save).toHaveBeenCalledTimes(1);
   } finally { stop(); jest.useRealTimers(); }
 });

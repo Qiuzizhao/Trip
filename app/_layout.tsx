@@ -4,6 +4,7 @@ import * as SplashScreen from 'expo-splash-screen';
 import { useEffect } from 'react';
 import { View } from 'react-native';
 
+import { startSystemAlbumSync } from '@/src/features/daily/footprints/systemAlbum/sync';
 import { ShareIntentHandler } from '@/src/features/daily/footprints/share/ShareIntentHandler';
 
 import { prewarmFootprintScreenData } from '@/src/local/homePreload';
@@ -21,6 +22,7 @@ export default function RootLayout() {
     });
     // 启动时（以及回到前台时）自动重试未完成的图片同步；记录级同步仍由用户手动触发
     startAssetAutoRetry();
+    return startSystemAlbumSync();
   }, []);
 
   return (

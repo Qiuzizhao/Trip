@@ -27,7 +27,14 @@ function isLocalUri(uri: string) {
   return /^(file|content):\/\//i.test(uri);
 }
 
-export async function migrateFootprintImagesToAssets() {
+let migration: Promise<{ created: number; skipped: boolean }> | null = null;
+
+export function migrateFootprintImagesToAssets() {
+  if (!migration) migration = runMigration().finally(() => { migration = null; });
+  return migration;
+}
+
+async function runMigration() {
   const alreadyMigrated = await getJson<string | null>(migratedKey, null);
   if (alreadyMigrated) return { created: 0, skipped: true };
 

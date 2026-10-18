@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import React, { useEffect, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Switch, Text, View, Linking, Platform } from 'react-native';
 
 import {
   defaultAppSettings,
@@ -10,11 +10,14 @@ import {
   updateAppSettings,
   type AppSettings,
 } from '@/src/local/repositories/appSettingsRepository';
+import { getSystemAlbumState, subscribeSystemAlbum, syncSystemAlbum } from '@/src/features/daily/footprints/systemAlbum/sync';
 import { Header, IconButton, Screen } from '@/src/shared/components';
 import { colors, radius, shadow, spacing, useThemeColors } from '@/src/shared/theme';
 
 export function SettingsScreen() {
   const themeColors = useThemeColors();
+  const [album, setAlbum] = useState(getSystemAlbumState);
+  useEffect(() => subscribeSystemAlbum(setAlbum), []);
   const [settings, setSettings] = useState<AppSettings>(defaultAppSettings);
 
   useEffect(() => {
@@ -66,6 +69,31 @@ export function SettingsScreen() {
               value={settings.localOnlyMode}
             />
           </View>
+          {Platform.OS === 'ios' && <Pressable
+            accessibilityLabel="Trip 系统相簿，点击补存或重试"
+            disabled={album.phase === 'syncing'}
+            onPress={() => {
+              if (album.permission && ['denied', 'limited', 'restricted'].includes(album.permission)) {
+                void Linking.openSettings();
+              } else { void syncSystemAlbum(); }
+            }}
+            style={({ pressed }) => [styles.settingRow, pressed && styles.cardPressed]}
+          >
+            <View style={styles.settingIconWrap}>
+              <Ionicons name="images-outline" size={22} color={themeColors.primary} />
+            </View>
+            <View style={styles.settingRowText}>
+              <Text style={styles.helperTitle}>Trip 系统相簿</Text>
+              <Text style={styles.helperText}>{
+                album.phase === 'syncing' ? `正在补存照片 ${album.completed} / ${album.total}`
+                  : album.phase === 'permission' ? '请在系统设置中允许完整访问照片，自动补存新旧照片'
+                  : album.phase === 'error' ? `${album.failed} 张照片未保存，点击重试`
+                  : album.phase === 'done' ? `已保存 ${album.completed} 张照片，点击重新检查`
+                  : '新旧足迹照片自动存入系统相册的 Trip 相簿，点击补存'
+              }</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={19} color={colors.muted} />
+          </Pressable>}
           <View style={styles.bottomSpacer} />
         </ScrollView>
       </View>

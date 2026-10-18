@@ -54,7 +54,9 @@
     <key>NSMicrophoneUsageDescription</key>
     <string>Allow $(PRODUCT_NAME) to access your microphone</string>
     <key>NSPhotoLibraryUsageDescription</key>
-    <string>Allow $(PRODUCT_NAME) to access your photos</string>
+    <string>允许 Trip 将新旧足迹照片保存到系统相册的 Trip 专用相簿，并检查相簿以避免重复保存。请选择完整访问。</string>
+    <key>NSPhotoLibraryAddUsageDescription</key>
+    <string>将足迹原照片保存到系统相册的 Trip 专用相簿。</string>
     <key>NSUserActivityTypes</key>
     <array>
       <string>$(PRODUCT_BUNDLE_IDENTIFIER).expo.index_route</string>

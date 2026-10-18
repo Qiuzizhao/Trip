@@ -169,7 +169,7 @@ test('passes the footprint location to Photos and does not resave after a locati
 test('manual restore retires deleted Photos receipts and saves missing photos once', async () => {
   await setJson('trip.system-photo-album.hashes.v1', { 'asset:one:1': 'hash-one' });
   await setJson('trip.system-photo-album.receipts.v2', ['hash-one']);
-  mock(native.reconcileAlbum).mockResolvedValueOnce([]).mockResolvedValue(['hash-one']);
+  mock(native.reconcileAlbum).mockResolvedValueOnce({ hashes: [], unresolved: 0 }).mockResolvedValue({ hashes: ['hash-one'], unresolved: 0 });
   await restoreSystemAlbum();
   expect(native.reconcileAlbum).toHaveBeenCalledTimes(1);
   expect(native.save).toHaveBeenCalledTimes(1);
@@ -180,7 +180,7 @@ test('manual restore retires deleted Photos receipts and saves missing photos on
 
 test('manual restore reuses Photos assets when only the album was removed', async () => {
   await setJson('trip.system-photo-album.hashes.v1', { 'asset:one:1': 'hash-one' });
-  mock(native.reconcileAlbum).mockResolvedValue(['hash-one']);
+  mock(native.reconcileAlbum).mockResolvedValue({ hashes: ['hash-one'], unresolved: 0 });
   await restoreSystemAlbum();
   expect(native.reconcileAlbum).toHaveBeenCalledTimes(1);
   expect(native.hashFile).not.toHaveBeenCalled();
@@ -204,4 +204,26 @@ test('failed or permission-limited reconciliation never clears saved receipts or
 test('automatic background sync never reconciles or resets historical receipts', async () => {
   await syncSystemAlbum();
   expect(native.reconcileAlbum).not.toHaveBeenCalled();
+});
+
+test('restores deleted historical photos using their current footprint location', async () => {
+  mock(listAllAssets).mockResolvedValue([]);
+  mock(listFootprintsLocal).mockResolvedValue([{ id: 'old', location: '故宫', image_urls: ['file:///old/IMG_0001.heic'] }]);
+  await setJson('trip.system-photo-album.hashes.v1', { 'legacy:file:///old/IMG_0001.heic': 'hash-one' });
+  await setJson('trip.system-photo-album.receipts.v2', ['hash-one']);
+  mock(native.reconcileAlbum).mockResolvedValue({ hashes: [], unresolved: 0 });
+  await restoreSystemAlbum(true);
+  expect(native.reconcileAlbum).toHaveBeenCalledWith(true);
+  expect(native.save).toHaveBeenCalledWith('file:///old/IMG_0001.heic', 'hash-one', '故宫');
+  await syncSystemAlbum();
+  expect(native.save).toHaveBeenCalledTimes(1);
+});
+
+test('default restoration is scoped and preserves unresolved legacy receipts', async () => {
+  await setJson('trip.system-photo-album.hashes.v1', { 'asset:one:1': 'hash-one' });
+  mock(native.reconcileAlbum).mockResolvedValue({ hashes: ['hash-one'], unresolved: 1 });
+  await restoreSystemAlbum();
+  expect(native.reconcileAlbum).toHaveBeenCalledWith(false);
+  expect(native.save).not.toHaveBeenCalled();
+  expect(getSystemAlbumState().needsLibraryScan).toBe(1);
 });

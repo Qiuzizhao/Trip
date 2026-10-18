@@ -16,7 +16,7 @@ export const photoAlbumNative = Platform.OS === 'ios' ? requireOptionalNativeMod
   addListener?(event: 'duplicateScanProgress', listener: (progress: { scanned: number; total: number }) => void): { remove(): void };
   permission(request: boolean): Promise<AlbumPermission>;
   rememberSavedHashes?(hashes: string[]): Promise<void>;
-  reconcileAlbum?(): Promise<string[]>;
+  reconcileAlbum?(searchEntireLibrary: boolean): Promise<{ hashes: string[]; unresolved: number }>;
   snapshot(): Promise<string[]>;
   hashFile(uri: string): Promise<string>;
   save(uri: string, hash: string, location: string): Promise<boolean>;

@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import React, { useEffect, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Switch, Text, View, Linking, Platform } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Switch, Text, View, Platform } from 'react-native';
 
 import {
   defaultAppSettings,
@@ -10,14 +10,11 @@ import {
   updateAppSettings,
   type AppSettings,
 } from '@/src/local/repositories/appSettingsRepository';
-import { getSystemAlbumState, subscribeSystemAlbum, restoreSystemAlbum } from '@/src/features/daily/footprints/systemAlbum/sync';
 import { Header, IconButton, Screen } from '@/src/shared/components';
 import { colors, radius, shadow, spacing, useThemeColors } from '@/src/shared/theme';
 
 export function SettingsScreen() {
   const themeColors = useThemeColors();
-  const [album, setAlbum] = useState(getSystemAlbumState);
-  useEffect(() => subscribeSystemAlbum(setAlbum), []);
   const [settings, setSettings] = useState<AppSettings>(defaultAppSettings);
 
   useEffect(() => {
@@ -70,13 +67,8 @@ export function SettingsScreen() {
             />
           </View>
           {Platform.OS === 'ios' && <Pressable
-            accessibilityLabel="Trip 系统相簿，点击核对并恢复相簿"
-            disabled={album.phase === 'syncing' || album.phase === 'checking'}
-            onPress={() => {
-              if (album.permission && ['denied', 'limited', 'restricted'].includes(album.permission)) {
-                void Linking.openSettings();
-              } else { void restoreSystemAlbum(); }
-            }}
+            accessibilityLabel="Trip 系统相簿设置"
+            onPress={() => router.push('/settings/system-album' as never)}
             style={({ pressed }) => [styles.settingRow, pressed && styles.cardPressed]}
           >
             <View style={styles.settingIconWrap}>
@@ -84,14 +76,7 @@ export function SettingsScreen() {
             </View>
             <View style={styles.settingRowText}>
               <Text style={styles.helperTitle}>Trip 系统相簿</Text>
-              <Text style={styles.helperText}>{
-                album.phase === 'checking' ? '正在核对系统图库中的已保存照片…'
-                  : album.phase === 'syncing' ? `正在补存照片 ${album.completed} / ${album.total}`
-                  : album.phase === 'permission' ? '请在系统设置中允许完整访问照片，自动补存新旧照片'
-                  : album.phase === 'error' ? `${album.failed} 张照片未保存，点击重试`
-                  : album.phase === 'done' ? `已处理 ${album.completed} 张足迹照片，点击核对并恢复相簿`
-                  : '新旧足迹照片自动保存，点击核对并恢复 Trip 相簿'
-              }</Text>
+              <Text style={styles.helperText}>核对、恢复及查找范围设置</Text>
             </View>
             <Ionicons name="chevron-forward" size={19} color={colors.muted} />
           </Pressable>}

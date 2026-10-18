@@ -29,6 +29,8 @@ struct AlbumLedgerRegression {
     precondition(tripPhotoHash(from: "user-original.heif") == nil)
     precondition(tripPhotoFilename(hash: heifHash, location: "", extension: "heif") == "trip-\(heifHash).heif")
     precondition(tripPhotoFilename(hash: heifHash, location: String(repeating: "🏖️故宫", count: 100), extension: "heif").utf8.count < 255)
+    try secondLaunch.replaceWithVerifiedAssets([heifHash: "HEIF-PHOTOS-ID/L0/001"], retainingUnverified: [oldReceipt])
+    precondition(AlbumSaveLedger(url: url).contains(oldReceipt), "Album-only scanning must retain unresolved legacy receipts")
     try secondLaunch.replaceWithVerifiedAssets([heifHash: "HEIF-PHOTOS-ID/L0/001"])
     let reconciled = AlbumSaveLedger(url: url)
     precondition(reconciled.contains(heifHash))

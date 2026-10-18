@@ -14,6 +14,7 @@ export type AlbumState = {
   total: number;
   completed: number;
   failed: number;
+  needsLibraryScan?: number;
 };
 let state: AlbumState = { phase: 'idle', total: 0, completed: 0, failed: 0 };
 const listeners = new Set<(next: AlbumState) => void>();
@@ -58,7 +59,7 @@ async function sources(): Promise<Source[]> {
   });
 }
 
-async function sync(requestPermission: boolean, reconcile = false) {
+async function sync(requestPermission: boolean, reconcile = false, searchEntireLibrary = false) {
   const native = photoAlbumNative;
   if (!native) return;
   const items = await sources();
@@ -70,13 +71,15 @@ async function sync(requestPermission: boolean, reconcile = false) {
   // original filename. Migrate v1 acknowledgements before considering any new writes.
   let hashes = new Set([...receipts, ...Object.values(manifest)]);
   if (reconcile) {
-    publish({ phase: 'checking', total: items.length, completed: 0, failed: 0 });
+    publish({ phase: 'checking', total: items.length, completed: 0, failed: 0, needsLibraryScan: 0 });
     const permission = await native.permission(requestPermission);
     publish({ permission });
     if (permission !== 'authorized') { publish({ phase: 'permission' }); return; }
     if (!native.reconcileAlbum) throw new Error('请更新 Trip 后再恢复相簿');
     await native.rememberSavedHashes?.(Array.from(hashes));
-    hashes = new Set(await native.reconcileAlbum());
+    const result = await native.reconcileAlbum(searchEntireLibrary);
+    hashes = new Set(result.hashes);
+    publish({ needsLibraryScan: result.unresolved });
     manifest = Object.fromEntries(Object.entries(manifest).filter(([, hash]) => hashes.has(hash)));
     // Remove only receipts explicitly reconciled by the native Photos operation.
     await setJson(manifestKey, manifest);
@@ -149,15 +152,15 @@ export function syncSystemAlbum(requestPermission = true): Promise<void> {
   return runSync(requestPermission, false);
 }
 
-export function restoreSystemAlbum(): Promise<void> {
-  if (running) return running.then(() => restoreSystemAlbum());
-  return runSync(true, true);
+export function restoreSystemAlbum(searchEntireLibrary = false): Promise<void> {
+  if (running) return running.then(() => restoreSystemAlbum(searchEntireLibrary));
+  return runSync(true, true, searchEntireLibrary);
 }
 
-function runSync(requestPermission: boolean, reconcile: boolean): Promise<void> {
+function runSync(requestPermission: boolean, reconcile: boolean, searchEntireLibrary = false): Promise<void> {
   if (!photoAlbumNative || pauseDepth > 0) return Promise.resolve();
   if (running) { rerun = true; return running; }
-  running = sync(requestPermission, reconcile).catch(() => {
+  running = sync(requestPermission, reconcile, searchEntireLibrary).catch(() => {
     publish({ phase: 'error', failed: Math.max(1, state.failed) });
   }).finally(() => {
     running = null;

@@ -16,10 +16,12 @@ final class AlbumSaveLedger {
 
   var savedAssets: [String: String] { entries.filter { $0.value != "legacy-receipt" } }
   // Only explicit Photos reconciliation may retire historical receipts.
-  func replaceWithVerifiedAssets(_ verified: [String: String]) throws {
+  func replaceWithVerifiedAssets(_ verified: [String: String], retainingUnverified: Set<String> = []) throws {
+    var next = verified
+    for hash in retainingUnverified where next[hash] == nil { next[hash] = entries[hash] }
     try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-    try JSONEncoder().encode(verified).write(to: url, options: .atomic)
-    entries = verified
+    try JSONEncoder().encode(next).write(to: url, options: .atomic)
+    entries = next
   }
 
   var assetIdentifiers: Set<String> { Set(entries.values.filter { $0 != "legacy-receipt" }) }

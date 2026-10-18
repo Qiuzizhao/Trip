@@ -21,7 +21,7 @@
     <key>CFBundlePackageType</key>
     <string>$(PRODUCT_BUNDLE_PACKAGE_TYPE)</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.0.14</string>
+    <string>1.0.15</string>
     <key>CFBundleSignature</key>
     <string>????</string>
     <key>CFBundleURLTypes</key>
@@ -35,7 +35,7 @@
       </dict>
     </array>
     <key>CFBundleVersion</key>
-    <string>34</string>
+    <string>35</string>
     <key>ITSAppUsesNonExemptEncryption</key>
     <false/>
     <key>LSMinimumSystemVersion</key>
@@ -56,7 +56,7 @@
     <key>NSPhotoLibraryAddUsageDescription</key>
     <string>将足迹原照片保存到系统相册的 Trip 专用相簿。</string>
     <key>NSPhotoLibraryUsageDescription</key>
-    <string>允许 Trip 将新旧足迹照片保存到系统相册的 Trip 专用相簿，并检查相簿以避免重复保存。请选择完整访问。</string>
+    <string>允许 Trip 将新旧足迹照片保存到系统相册的 Trip 专用相簿、检查重复照片，并在你确认后清理重复副本。请选择完整访问。</string>
     <key>NSUserActivityTypes</key>
     <array>
       <string>$(PRODUCT_BUNDLE_IDENTIFIER).expo.index_route</string>

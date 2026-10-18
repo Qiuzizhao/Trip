@@ -9,7 +9,7 @@ import { resolveAssetUri } from '../assetResolver';
 import { photoAlbumNative, type AlbumPermission } from './native';
 
 export type AlbumState = {
-  phase: 'idle' | 'syncing' | 'done' | 'permission' | 'error';
+  phase: 'idle' | 'checking' | 'syncing' | 'done' | 'permission' | 'error';
   permission?: AlbumPermission;
   total: number;
   completed: number;
@@ -58,17 +58,30 @@ async function sources(): Promise<Source[]> {
   });
 }
 
-async function sync(requestPermission: boolean) {
+async function sync(requestPermission: boolean, reconcile = false) {
   const native = photoAlbumNative;
   if (!native) return;
   const items = await sources();
   if (!items.length) { publish({ phase: 'done', total: 0, completed: 0, failed: 0 }); return; }
   // Only the OS's first prompt is automatic; denied/limited access is handled in Settings.
-  const manifest = await getJson<Record<string, string>>(manifestKey, {});
+  let manifest = await getJson<Record<string, string>>(manifestKey, {});
   const receipts = await getJson<string[]>(receiptsKey, []);
   // A committed save is authoritative even if Photos cannot currently enumerate its
   // original filename. Migrate v1 acknowledgements before considering any new writes.
-  const hashes = new Set([...receipts, ...Object.values(manifest)]);
+  let hashes = new Set([...receipts, ...Object.values(manifest)]);
+  if (reconcile) {
+    publish({ phase: 'checking', total: items.length, completed: 0, failed: 0 });
+    const permission = await native.permission(requestPermission);
+    publish({ permission });
+    if (permission !== 'authorized') { publish({ phase: 'permission' }); return; }
+    if (!native.reconcileAlbum) throw new Error('请更新 Trip 后再恢复相簿');
+    await native.rememberSavedHashes?.(Array.from(hashes));
+    hashes = new Set(await native.reconcileAlbum());
+    manifest = Object.fromEntries(Object.entries(manifest).filter(([, hash]) => hashes.has(hash)));
+    // Remove only receipts explicitly reconciled by the native Photos operation.
+    await setJson(manifestKey, manifest);
+    await setJson(receiptsKey, Array.from(hashes));
+  }
   if (hashes.size !== new Set(receipts).size) {
     await native.rememberSavedHashes?.(Array.from(hashes));
     await setJson(receiptsKey, Array.from(hashes));
@@ -133,9 +146,18 @@ async function sync(requestPermission: boolean) {
 }
 
 export function syncSystemAlbum(requestPermission = true): Promise<void> {
+  return runSync(requestPermission, false);
+}
+
+export function restoreSystemAlbum(): Promise<void> {
+  if (running) return running.then(() => restoreSystemAlbum());
+  return runSync(true, true);
+}
+
+function runSync(requestPermission: boolean, reconcile: boolean): Promise<void> {
   if (!photoAlbumNative || pauseDepth > 0) return Promise.resolve();
   if (running) { rerun = true; return running; }
-  running = sync(requestPermission).catch(() => {
+  running = sync(requestPermission, reconcile).catch(() => {
     publish({ phase: 'error', failed: Math.max(1, state.failed) });
   }).finally(() => {
     running = null;

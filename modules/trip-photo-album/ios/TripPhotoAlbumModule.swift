@@ -43,6 +43,12 @@ public class TripPhotoAlbumModule: Module {
       try self.ledger.remember(hashes.filter { $0.count == 64 && $0.allSatisfy(\.isHexDigit) })
     }.runOnQueue(queue)
 
+    // User-triggered only: examine the whole library, not just a deleted Trip album.
+    AsyncFunction("reconcileAlbum") { () -> [String] in
+      try self.requirePermission()
+      return try AlbumRestorer().restore(ledger: self.ledger)
+    }.runOnQueue(queue)
+
     AsyncFunction("snapshot") { () -> [String] in
       try self.requirePermission()
       var hashes = self.ledger.hashes

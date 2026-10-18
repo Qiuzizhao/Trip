@@ -2,7 +2,7 @@
   "expo": {
     "name": "Trip",
     "slug": "trip-footprints",
-    "version": "1.0.15",
+    "version": "1.0.16",
     "orientation": "default",
     "icon": "./assets/images/app-icon-trip-white-route-v2.png",
     "scheme": "tripfootprints",
@@ -12,7 +12,7 @@
       "supportsTablet": true,
       "appleTeamId": "FAGAB6KML3",
       "bundleIdentifier": "com.qiuzizhao.tripfootprints",
-      "buildNumber": "35",
+      "buildNumber": "36",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
         "NSPhotoLibraryUsageDescription": "允许 Trip 将新旧足迹照片保存到系统相册的 Trip 专用相簿、检查重复照片，并在你确认后清理重复副本。请选择完整访问。",
@@ -20,7 +20,7 @@
       }
     },
     "android": {
-      "versionCode": 35,
+      "versionCode": 36,
       "adaptiveIcon": {
         "backgroundColor": "#FFFFFF",
         "foregroundImage": "./assets/images/app-icon-trip-white-route-v2.png"

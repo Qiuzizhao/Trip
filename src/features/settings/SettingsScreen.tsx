@@ -10,7 +10,7 @@ import {
   updateAppSettings,
   type AppSettings,
 } from '@/src/local/repositories/appSettingsRepository';
-import { getSystemAlbumState, subscribeSystemAlbum, syncSystemAlbum } from '@/src/features/daily/footprints/systemAlbum/sync';
+import { getSystemAlbumState, subscribeSystemAlbum, restoreSystemAlbum } from '@/src/features/daily/footprints/systemAlbum/sync';
 import { Header, IconButton, Screen } from '@/src/shared/components';
 import { colors, radius, shadow, spacing, useThemeColors } from '@/src/shared/theme';
 
@@ -70,12 +70,12 @@ export function SettingsScreen() {
             />
           </View>
           {Platform.OS === 'ios' && <Pressable
-            accessibilityLabel="Trip 系统相簿，点击补存未完成的照片"
-            disabled={album.phase === 'syncing'}
+            accessibilityLabel="Trip 系统相簿，点击核对并恢复相簿"
+            disabled={album.phase === 'syncing' || album.phase === 'checking'}
             onPress={() => {
               if (album.permission && ['denied', 'limited', 'restricted'].includes(album.permission)) {
                 void Linking.openSettings();
-              } else { void syncSystemAlbum(); }
+              } else { void restoreSystemAlbum(); }
             }}
             style={({ pressed }) => [styles.settingRow, pressed && styles.cardPressed]}
           >
@@ -85,11 +85,12 @@ export function SettingsScreen() {
             <View style={styles.settingRowText}>
               <Text style={styles.helperTitle}>Trip 系统相簿</Text>
               <Text style={styles.helperText}>{
-                album.phase === 'syncing' ? `正在补存照片 ${album.completed} / ${album.total}`
+                album.phase === 'checking' ? '正在核对系统图库中的已保存照片…'
+                  : album.phase === 'syncing' ? `正在补存照片 ${album.completed} / ${album.total}`
                   : album.phase === 'permission' ? '请在系统设置中允许完整访问照片，自动补存新旧照片'
                   : album.phase === 'error' ? `${album.failed} 张照片未保存，点击重试`
-                  : album.phase === 'done' ? `已完成 ${album.completed} 张照片的保存检查`
-                  : '新旧足迹照片自动存入系统相册的 Trip 相簿，点击补存'
+                  : album.phase === 'done' ? `已处理 ${album.completed} 张足迹照片，点击核对并恢复相簿`
+                  : '新旧足迹照片自动保存，点击核对并恢复 Trip 相簿'
               }</Text>
             </View>
             <Ionicons name="chevron-forward" size={19} color={colors.muted} />

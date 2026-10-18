@@ -18,5 +18,5 @@ export const photoAlbumNative = Platform.OS === 'ios' ? requireOptionalNativeMod
   rememberSavedHashes?(hashes: string[]): Promise<void>;
   snapshot(): Promise<string[]>;
   hashFile(uri: string): Promise<string>;
-  save(uri: string, hash: string): Promise<boolean>;
+  save(uri: string, hash: string, location: string): Promise<boolean>;
 }>('TripPhotoAlbum') : null;

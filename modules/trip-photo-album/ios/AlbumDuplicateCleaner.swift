@@ -46,7 +46,7 @@ final class AlbumDuplicateCleaner {
           }
           let hash = try resourceHash(resource)
           let name = resource.originalFilename.lowercased()
-          let taggedHash = name.hasPrefix("trip-") ? String(name.dropFirst(5).split(separator: ".").first ?? "") : ""
+          let taggedHash = tripPhotoHash(from: name)
           let owned = ownedIDs.contains(photo.localIdentifier) || taggedHash == hash
           let protected = photo.isFavorite || photo.isHidden || !photo.canPerform(.delete)
             || resources.contains(where: { $0.type == .adjustmentData })

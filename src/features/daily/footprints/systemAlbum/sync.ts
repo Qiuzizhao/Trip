@@ -29,7 +29,7 @@ function publish(patch: Partial<AlbumState>) {
 
 const manifestKey = 'trip.system-photo-album.hashes.v1';
 const receiptsKey = 'trip.system-photo-album.receipts.v2';
-type Source = { key: string; resolve: () => Promise<string | null> };
+type Source = { location: string; key: string; resolve: () => Promise<string | null> };
 let running: Promise<void> | null = null;
 let rerun = false;
 let pauseDepth = 0;
@@ -41,14 +41,17 @@ async function sources(): Promise<Source[]> {
   const records = await listFootprintsLocal();
   const assets = await listAllAssets();
   return records.flatMap((record) => {
+    const location = typeof record.location === 'string' ? record.location.trim() : '';
     const pictures = assets.filter((asset) => asset.footprintId === record.id);
     if (pictures.length) return pictures.map((asset) => ({
+      location,
       key: `asset:${asset.id}:${asset.blobUpdatedTime}`,
       resolve: () => resolveAssetUri(asset),
     }));
     const old = Array.isArray(record.image_urls) ? record.image_urls
       : typeof record.image_urls === 'string' ? [record.image_urls] : [record.image_url];
     return [...new Set(old.filter((uri): uri is string => typeof uri === 'string' && Boolean(uri)))].map((uri) => ({
+      location,
       key: `legacy:${uri}`,
       resolve: async () => uri,
     }));
@@ -109,7 +112,7 @@ async function sync(requestPermission: boolean) {
         }
         const hash = await native.hashFile(uri);
         if (!hashes.has(hash)) {
-          await native.save(uri, hash);
+          await native.save(uri, hash, item.location);
           hashes.add(hash);
           await setJson(receiptsKey, Array.from(hashes));
         }

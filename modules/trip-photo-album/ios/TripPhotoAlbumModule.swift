@@ -54,10 +54,7 @@ public class TripPhotoAlbumModule: Module {
           PHAsset.fetchAssets(in: album, options: nil).enumerateObjects { asset, _, _ in
             for resource in PHAssetResource.assetResources(for: asset) {
               let name = resource.originalFilename.lowercased()
-              if name.hasPrefix("trip-") {
-                let hash = String(name.dropFirst(5).split(separator: ".").first ?? "")
-                if hash.count == 64 && hash.allSatisfy(\.isHexDigit) { hashes.insert(hash) }
-              }
+              if let hash = tripPhotoHash(from: name) { hashes.insert(hash) }
             }
           }
         }
@@ -79,7 +76,7 @@ public class TripPhotoAlbumModule: Module {
       return hasher.finalize().map { String(format: "%02x", $0) }.joined()
     }.runOnQueue(queue)
 
-    AsyncFunction("save") { (uri: String, hash: String) -> Bool in
+    AsyncFunction("save") { (uri: String, hash: String, location: String) -> Bool in
       guard hash.count == 64 && hash.allSatisfy(\.isHexDigit) else { throw AlbumError.invalidFile }
       // The native boundary also enforces idempotency. Never rely on a Photos filename
       // being immediately visible (in particular for HEIF/HEIC and iCloud resources).
@@ -98,7 +95,7 @@ public class TripPhotoAlbumModule: Module {
         let asset = PHAssetCreationRequest.forAsset()
         let options = PHAssetResourceCreationOptions()
         options.uniformTypeIdentifier = typeIdentifier
-        options.originalFilename = "trip-\(hash).\(ext.isEmpty ? "jpg" : ext)"
+        options.originalFilename = tripPhotoFilename(hash: hash, location: location, extension: ext.isEmpty ? "jpg" : ext)
         asset.addResource(with: .photo, fileURL: url, options: options)
         let albumRequest: PHAssetCollectionChangeRequest?
         if let album = existingAlbum {

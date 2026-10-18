@@ -42,7 +42,7 @@ test('backfills legacy records and downloads remote originals, cleaning temporar
   mock(listFootprintsLocal).mockResolvedValue([{ id: 'old', image_urls: ['https://example.com/old.heic'] }]);
   mock(FileSystem.downloadAsync).mockResolvedValue({ status: 200, uri: 'file:///cache/trip-system-album/original.heic' });
   await syncSystemAlbum();
-  expect(native.save).toHaveBeenCalledWith('file:///cache/trip-system-album/original.heic', 'hash-one');
+  expect(native.save).toHaveBeenCalledWith('file:///cache/trip-system-album/original.heic', 'hash-one', '');
   expect(FileSystem.deleteAsync).toHaveBeenCalled();
   expect(getSystemAlbumState()).toMatchObject({ phase: 'done', completed: 1 });
 });
@@ -155,4 +155,13 @@ test('metadata, upload completion, and cover reordering do not restart album sca
     expect(native.snapshot).toHaveBeenCalledTimes(scans);
     expect(native.save).toHaveBeenCalledTimes(1);
   } finally { stop(); jest.useRealTimers(); }
+});
+
+test('passes the footprint location to Photos and does not resave after a location edit', async () => {
+  mock(listFootprintsLocal).mockResolvedValue([{ id: 'old', location: '  故宫  ' }]);
+  await syncSystemAlbum();
+  expect(native.save).toHaveBeenCalledWith('file:///photos/one.heic', 'hash-one', '故宫');
+  mock(listFootprintsLocal).mockResolvedValue([{ id: 'old', location: '天坛' }]);
+  await syncSystemAlbum();
+  expect(native.save).toHaveBeenCalledTimes(1);
 });

@@ -33,3 +33,24 @@ final class AlbumSaveLedger {
     try JSONEncoder().encode(entries).write(to: url, options: .atomic)
   }
 }
+
+// Location is descriptive only; the embedded content hash remains the identity.
+func tripPhotoFilename(hash: String, location: String, extension ext: String) -> String {
+  let forbidden = CharacterSet.controlCharacters.union(CharacterSet(charactersIn: "/\\:*?\"<>|"))
+  let cleaned = location.components(separatedBy: forbidden).joined(separator: " ")
+    .split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
+  var place = ""
+  for character in cleaned {
+    if place.utf8.count + String(character).utf8.count > 120 { break }
+    place.append(character)
+  }
+  return "\(place.isEmpty ? "" : place + "_")trip-\(hash).\(ext)"
+}
+
+func tripPhotoHash(from filename: String) -> String? {
+  let pattern = #"(?:^|_)trip-([a-f0-9]{64})\.[^.]+$"#
+  guard let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive),
+    let match = regex.firstMatch(in: filename, range: NSRange(filename.startIndex..., in: filename)),
+    let range = Range(match.range(at: 1), in: filename) else { return nil }
+  return String(filename[range]).lowercased()
+}

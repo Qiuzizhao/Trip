@@ -21,6 +21,15 @@ struct AlbumLedgerRegression {
     precondition(persisted[heifHash] == "HEIF-PHOTOS-ID/L0/001", "Migrating v1 receipts must preserve native Photos IDs")
     precondition(persisted[oldReceipt] == "legacy-receipt")
     precondition(AlbumSaveLedger(url: url).hashes.count == 3)
+    let name = tripPhotoFilename(hash: heifHash, location: "  故宫/午门:\n 北京  ", extension: "heif")
+    precondition(name == "故宫 午门 北京_trip-\(heifHash).heif")
+    precondition(tripPhotoHash(from: name) == heifHash)
+    precondition(tripPhotoHash(from: "trip-\(heifHash).heif") == heifHash)
+    precondition(tripPhotoHash(from: "trip-\(heifHash.uppercased()).HEIC") == heifHash)
+    precondition(tripPhotoHash(from: "user-original.heif") == nil)
+    precondition(tripPhotoFilename(hash: heifHash, location: "", extension: "heif") == "trip-\(heifHash).heif")
+    precondition(tripPhotoFilename(hash: heifHash, location: String(repeating: "🏖️故宫", count: 100), extension: "heif").utf8.count < 255)
+    print("PASS: location filename sanitization, size limits, and new/legacy hash recognition")
     print("PASS: native receipts survive restarts, HEIF filename changes, and legacy receipt migration")
   }
 }

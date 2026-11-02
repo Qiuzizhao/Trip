@@ -4,6 +4,13 @@ const { withAppBuildGradle } = require('@expo/config-plugins');
 module.exports = function withAndroidSigning(config) {
   return withAppBuildGradle(config, (config) => {
     const marker = '// Trip Android release signing';
+    config.modResults.contents = config.modResults.contents.replace(
+      /(buildTypes\s*\{[\s\S]*?\brelease\s*\{[\s\S]*?)signingConfig signingConfigs.debug/,
+      '$1signingConfig signingConfigs.release'
+    );
+    if (!/buildTypes\s*\{[\s\S]*?\brelease\s*\{\s*(?:\/\/[^\n]*\n\s*)*signingConfig signingConfigs.release/.test(config.modResults.contents)) {
+      throw new Error('Cannot configure Trip Android release signing');
+    }
     if (config.modResults.contents.includes(marker)) return config;
     config.modResults.contents = config.modResults.contents.replace(
       'android {',
@@ -30,7 +37,7 @@ android {`
                 keyPassword tripSigning.getProperty("keyPassword")
             }
         }`
-    ).replace(/(release\s*\{\s*\/\/ Caution:[\s\S]*?)signingConfig signingConfigs.debug/, '$1signingConfig signingConfigs.release');
+    );
     return config;
   });
 };

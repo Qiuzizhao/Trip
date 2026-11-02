@@ -12,6 +12,7 @@ npm-debug.*
 *.mobileprovision
 android/local.properties
 android/.gradle/
+android/.kotlin/
 android/.cxx/
 android/**/build/
 *.orig.*

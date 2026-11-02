@@ -1,8 +1,7 @@
 diff --git a/node_modules/expo-share-intent/android/src/main/java/expo/modules/shareintent/ExpoShareIntentModule.kt b/node_modules/expo-share-intent/android/src/main/java/expo/modules/shareintent/ExpoShareIntentModule.kt
-index 0153c89..839740c 100644
 --- a/node_modules/expo-share-intent/android/src/main/java/expo/modules/shareintent/ExpoShareIntentModule.kt
 +++ b/node_modules/expo-share-intent/android/src/main/java/expo/modules/shareintent/ExpoShareIntentModule.kt
-@@ -55,63 +55,66 @@ class ExpoShareIntentModule : Module() {
+@@ -55,63 +55,66 @@
              instance!!.sendEvent("onError", mapOf("value" to message))
          }
  
@@ -28,9 +27,6 @@ index 0153c89..839740c 100644
 -            var mediaWidth: String? = null;
 -            var mediaHeight: String? = null;
 -            var mediaDuration: String? = null;
--            if (mimeType.startsWith("image/")) {
--                val options = BitmapFactory.Options().apply {
--                    inJustDecodeBounds = true
 +            val resolver = instance?.context?.contentResolver
 +                ?: throw IllegalStateException("Cannot read shared photo")
 +            var fileName: String? = null
@@ -42,25 +38,9 @@ index 0153c89..839740c 100644
 +                    val sizeIndex = cursor.getColumnIndex(OpenableColumns.SIZE)
 +                    if (nameIndex >= 0) fileName = cursor.getString(nameIndex)
 +                    if (sizeIndex >= 0) fileSize = cursor.getString(sizeIndex)
-                 }
--                BitmapFactory.decodeStream(resolver.openInputStream(uri), null, options)
--                mediaHeight = options.outHeight.toString()
--                mediaWidth = options.outWidth.toString()
-             }
--            if (mimeType.startsWith("video/")) {
--                val retriever = MediaMetadataRetriever()
--                retriever.setDataSource(instance?.getAbsolutePath(uri))
--                mediaWidth = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toInt().toString() ?: null
--                mediaHeight = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toInt().toString() ?: null
--                // Check orientation and flip size if required
--                val metaRotation = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)?.toInt() ?: 0;
--                if (metaRotation == 90 || metaRotation == 270) {
--                    mediaWidth = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toInt().toString() ?: null
--                    mediaHeight = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toInt().toString() ?: null
--                }
--                mediaDuration = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toInt().toString() ?: null
-             }
--
++                }
++            }
++            }
 +            val extension = fileName?.substringAfterLast('.', "")?.lowercase()
 +            val mimeType = resolver.getType(uri)
 +                ?: extension?.let { MimeTypeMap.getSingleton().getMimeTypeFromExtension(it) }
@@ -80,7 +60,28 @@ index 0153c89..839740c 100644
 +            }
 +            var width: String? = null
 +            var height: String? = null
-+            if (mimeType.startsWith("image/")) {
+             if (mimeType.startsWith("image/")) {
+-                val options = BitmapFactory.Options().apply {
+-                    inJustDecodeBounds = true
+-                }
+-                BitmapFactory.decodeStream(resolver.openInputStream(uri), null, options)
+-                mediaHeight = options.outHeight.toString()
+-                mediaWidth = options.outWidth.toString()
+-            }
+-            if (mimeType.startsWith("video/")) {
+-                val retriever = MediaMetadataRetriever()
+-                retriever.setDataSource(instance?.getAbsolutePath(uri))
+-                mediaWidth = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toInt().toString() ?: null
+-                mediaHeight = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toInt().toString() ?: null
+-                // Check orientation and flip size if required
+-                val metaRotation = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)?.toInt() ?: 0;
+-                if (metaRotation == 90 || metaRotation == 270) {
+-                    mediaWidth = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toInt().toString() ?: null
+-                    mediaHeight = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toInt().toString() ?: null
+-                }
+-                mediaDuration = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toInt().toString() ?: null
+-            }
+-
 +                val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
 +                BitmapFactory.decodeFile(target.path, options)
 +                width = options.outWidth.toString()
@@ -117,7 +118,7 @@ index 0153c89..839740c 100644
              val activity = instance?.currentActivity
              if (activity != null && !activity.isTaskRoot) {
                  val newIntent = Intent(intent).apply {
-@@ -142,7 +145,7 @@ class ExpoShareIntentModule : Module() {
+@@ -142,7 +145,7 @@
                  if (intent.action == Intent.ACTION_SEND) {
                      val uri = intent.parcelable<Uri>(Intent.EXTRA_STREAM);
                      if (uri != null) {
@@ -127,10 +128,9 @@ index 0153c89..839740c 100644
                          notifyError("empty uri for file sharing: " + intent.action)
                      }
 diff --git a/node_modules/expo-share-intent/build/useShareIntent.js b/node_modules/expo-share-intent/build/useShareIntent.js
-index 1ab12c4..18437d4 100644
 --- a/node_modules/expo-share-intent/build/useShareIntent.js
 +++ b/node_modules/expo-share-intent/build/useShareIntent.js
-@@ -39,10 +39,10 @@ export default function useShareIntent(options = SHAREINTENT_OPTIONS_DEFAULT) {
+@@ -39,10 +39,10 @@
          options.debug && console.debug("useShareIntent[refresh]", url);
          if (url?.includes(`${getScheme(options)}://dataUrl=`)) {
              // iOS only
@@ -144,7 +144,6 @@ index 1ab12c4..18437d4 100644
          else if (Platform.OS === "ios") {
              options.debug &&
 diff --git a/node_modules/expo-share-intent/ios/ExpoShareIntentModule.swift b/node_modules/expo-share-intent/ios/ExpoShareIntentModule.swift
-index e52b6d0..31c1b2e 100644
 --- a/node_modules/expo-share-intent/ios/ExpoShareIntentModule.swift
 +++ b/node_modules/expo-share-intent/ios/ExpoShareIntentModule.swift
 @@ -7,6 +7,7 @@
@@ -155,7 +154,7 @@ index e52b6d0..31c1b2e 100644
  
  public class ExpoShareIntentModule: Module {
      // Each module class must implement the definition function. The definition consists of components
-@@ -25,7 +26,7 @@ public class ExpoShareIntentModule: Module {
+@@ -25,7 +26,7 @@
          AsyncFunction("getShareIntent") { (url: String) in
              let fileUrl = URL(string: url)
              let json = handleUrl(url: fileUrl)
@@ -164,7 +163,7 @@ index e52b6d0..31c1b2e 100644
                  self.sendEvent(
                      "onChange",
                      [
-@@ -34,6 +35,32 @@ public class ExpoShareIntentModule: Module {
+@@ -34,6 +35,32 @@
              }
          }
  
@@ -197,7 +196,7 @@ index e52b6d0..31c1b2e 100644
          Function("clearShareIntent") { (sharedKey: String) in
              let appGroupIdentifier = self.getAppGroupIdentifier()
              let userDefaults = UserDefaults(suiteName: appGroupIdentifier)
-@@ -56,12 +83,19 @@ public class ExpoShareIntentModule: Module {
+@@ -56,12 +83,19 @@
      private func handleUrl(url: URL?) -> String? {
          let appGroupIdentifier = self.getAppGroupIdentifier()
          NSLog("HandleUrl \(String(describing: url)) \(String(describing: appGroupIdentifier))")
@@ -218,7 +217,7 @@ index e52b6d0..31c1b2e 100644
                          let sharedMediaFiles: [SharedMediaFile] = sharedArray.compactMap {
                              if let path = getAbsolutePath(for: $0.path) {
                                  if $0.type == .video && $0.thumbnail != nil {
-@@ -92,7 +126,10 @@ public class ExpoShareIntentModule: Module {
+@@ -92,7 +126,10 @@
              } else if url.fragment == "file" {
                  if let key = url.host?.components(separatedBy: "=").last {
                      if let json = userDefaults?.object(forKey: key) as? Data {
@@ -230,7 +229,7 @@ index e52b6d0..31c1b2e 100644
                          let sharedMediaFiles: [SharedMediaFile] = sharedArray.compactMap {
                              if let path = getAbsolutePath(for: $0.path) {
                                  return SharedMediaFile.init(
-@@ -111,7 +148,10 @@ public class ExpoShareIntentModule: Module {
+@@ -111,7 +148,10 @@
              } else if url.fragment == "weburl" {
                  if let key = url.host?.components(separatedBy: "=").last {
                      if let json = userDefaults?.object(forKey: key) as? Data {
@@ -242,16 +241,14 @@ index e52b6d0..31c1b2e 100644
                          let sharedWebUrls: [WebUrl] = sharedArray.compactMap {
                              return WebUrl.init(url: $0.url, meta: $0.meta)
                          }
-@@ -203,31 +243,16 @@ public class ExpoShareIntentModule: Module {
+@@ -203,31 +243,16 @@
          return url
      }
  
 -    private func decodeMedia(data: Data) -> [SharedMediaFile] {
 -        let encodedData = try? JSONDecoder().decode([SharedMediaFile].self, from: data)
 -        return encodedData!
-+    private func decodeMedia(data: Data) -> [SharedMediaFile]? {
-+        return try? JSONDecoder().decode([SharedMediaFile].self, from: data)
-     }
+-    }
 -    private func decodeWebUrl(data: Data) -> [WebUrl] {
 -        let encodedData = try? JSONDecoder().decode([WebUrl].self, from: data)
 -        return encodedData!
@@ -264,10 +261,8 @@ index e52b6d0..31c1b2e 100644
 -        let encodedData = try? JSONEncoder().encode(data)
 -        let json = String(data: encodedData!, encoding: .utf8)!
 -        return json
-+    private func decodeWebUrl(data: Data) -> [WebUrl]? {
-+        return try? JSONDecoder().decode([WebUrl].self, from: data)
-     }
- 
+-    }
+-    
 -    private func toJson(data: [WebUrl]?) -> String? {
 -        if data == nil {
 -            return nil
@@ -275,13 +270,20 @@ index e52b6d0..31c1b2e 100644
 -        let encodedData = try? JSONEncoder().encode(data)
 -        let json = String(data: encodedData!, encoding: .utf8)!
 -        return json
++    private func decodeMedia(data: Data) -> [SharedMediaFile]? {
++        return try? JSONDecoder().decode([SharedMediaFile].self, from: data)
++    }
++    private func decodeWebUrl(data: Data) -> [WebUrl]? {
++        return try? JSONDecoder().decode([WebUrl].self, from: data)
++    }
++
 +    private func toJson<T: Encodable>(data: T?) -> String? {
 +        guard let data, let encoded = try? JSONEncoder().encode(data) else { return nil }
 +        return String(data: encoded, encoding: .utf8)
      }
  
      struct ShareIntentText: Codable {
-@@ -286,8 +311,7 @@ public class ExpoShareIntentModule: Module {
+@@ -286,8 +311,7 @@
  
  extension Encodable {
      func toJSON() throws -> String? {

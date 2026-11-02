@@ -567,6 +567,7 @@ export function FootprintImagePreviewModal({
       // "Supported orientations has no common orientation"），预览要支持横屏必须在这里放开。
       supportedOrientations={['portrait', 'landscape-left', 'landscape-right']}
       statusBarTranslucent
+      navigationBarTranslucent
       transparent
       visible={visible}
     >

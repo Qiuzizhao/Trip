@@ -171,7 +171,9 @@ const componentStyles = {
 export function Screen({ children }: PropsWithChildren) {
   const insets = useSafeAreaInsets();
   return (
-    <View style={componentStyles.screen}>
+    <View style={[componentStyles.screen, Platform.OS === 'android' && {
+      paddingBottom: insets.bottom, paddingLeft: insets.left, paddingRight: insets.right,
+    }]}>
       <StatusBar style="dark" backgroundColor={colors.brandSoft} translucent />
       <View style={{ height: insets.top, backgroundColor: colors.brandSoft }} />
       {children}

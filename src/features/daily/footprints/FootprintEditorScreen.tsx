@@ -2,7 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { LinearGradient } from 'expo-linear-gradient';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Animated, Easing, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { Alert, Animated, Easing, Platform, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 
 import { DateField, Field, PrimaryButton, StateView } from '@/src/shared/components';
 import { buildAssetUrl } from '@/src/shared/api';
@@ -213,19 +213,22 @@ export function FootprintEditorScreen({
   }, [sharedDraftId, isEditing]);
 
   const pickImage = async () => {
-    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!permission.granted) {
-      Alert.alert('需要权限', '请允许访问相册后再上传图片。');
-      return;
-    }
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['images'],
-      allowsMultipleSelection: true,
-      preferredAssetRepresentationMode: ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Current,
-      quality: 1,
-    });
-    if (result.canceled || !result.assets[0]) return;
     try {
+      // Android's system photo picker grants access to just the selected photos.
+      if (Platform.OS !== 'android') {
+        const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+        if (!permission.granted) {
+          Alert.alert('需要权限', '请允许访问相册后再上传图片。');
+          return;
+        }
+      }
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsMultipleSelection: true,
+        preferredAssetRepresentationMode: ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Current,
+        quality: 1,
+      });
+      if (result.canceled || !result.assets[0]) return;
       const selectedUris = await Promise.all(result.assets.map((asset) => persistFootprintImageUri(asset.uri)));
       setForm((current) => ({ ...current, image_urls: imageList([...current.image_urls, ...selectedUris]) }));
     } catch (err) {

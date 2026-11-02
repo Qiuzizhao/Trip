@@ -30,6 +30,16 @@ it('persists all photos in order before making the draft available', async () =>
   expect(await readSharedFootprintDraft(id)).toEqual(['file:///documents/one.jpg', 'file:///documents/two.jpg']);
 });
 
+it('accepts Android content URIs and copies them before the share grant expires', async () => {
+  const uri = 'content://media/external/images/media/42';
+  expect(sharedImageUris([file(uri), file(uri), file('https://example.com/photo.jpg')])).toEqual([uri]);
+  jest.mocked(persistFootprintImageUri).mockResolvedValueOnce('file:///documents/android.jpg');
+  const id = await createSharedFootprintDraft([file(uri)]);
+  expect(persistFootprintImageUri).toHaveBeenCalledWith(uri);
+  expect(AsyncStorage.setItem).toHaveBeenCalledWith(`trip:shared-footprint:${id}`, JSON.stringify(['file:///documents/android.jpg']));
+  expect(FileSystem.deleteAsync).not.toHaveBeenCalledWith(uri, expect.anything());
+});
+
 it('rolls back copied files when one image fails instead of dropping it silently', async () => {
   jest.mocked(persistFootprintImageUri).mockResolvedValueOnce('file:///documents/one.jpg').mockRejectedValueOnce(new Error('copy failed'));
   await expect(createSharedFootprintDraft([file('file:///shared/one.jpg'), file('file:///shared/two.jpg')])).rejects.toThrow('copy failed');

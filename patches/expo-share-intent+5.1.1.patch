@@ -1,3 +1,131 @@
+diff --git a/node_modules/expo-share-intent/android/src/main/java/expo/modules/shareintent/ExpoShareIntentModule.kt b/node_modules/expo-share-intent/android/src/main/java/expo/modules/shareintent/ExpoShareIntentModule.kt
+index 0153c89..839740c 100644
+--- a/node_modules/expo-share-intent/android/src/main/java/expo/modules/shareintent/ExpoShareIntentModule.kt
++++ b/node_modules/expo-share-intent/android/src/main/java/expo/modules/shareintent/ExpoShareIntentModule.kt
+@@ -55,63 +55,66 @@ class ExpoShareIntentModule : Module() {
+             instance!!.sendEvent("onError", mapOf("value" to message))
+         }
+ 
+-        @SuppressLint("Range")
+         private fun getFileInfo(uri: Uri): Map<String, String?> {
+-            val resolver: ContentResolver? = instance?.currentActivity?.contentResolver
+-                    ?: instance?.context?.contentResolver
+-            if (resolver == null) {
+-                notifyError("Cannot get resolver (getFileInfo)")
+-                return mapOf(
+-                    "contentUri" to uri.toString(),
+-                    "filePath" to instance?.getAbsolutePath(uri),
+-                )
+-            }
+-            val queryResult: Cursor = resolver.query(uri, null, null, null, null)!!
+-            queryResult.moveToFirst()
+-            val fileName = queryResult.getString(queryResult.getColumnIndex(OpenableColumns.DISPLAY_NAME))
+-            val fileSize = queryResult.getString(queryResult.getColumnIndex(OpenableColumns.SIZE))
+-            queryResult.close()
+-
+-            val mimeType = resolver.getType(uri)!!
+-
+-            var mediaWidth: String? = null;
+-            var mediaHeight: String? = null;
+-            var mediaDuration: String? = null;
+-            if (mimeType.startsWith("image/")) {
+-                val options = BitmapFactory.Options().apply {
+-                    inJustDecodeBounds = true
++            val resolver = instance?.context?.contentResolver
++                ?: throw IllegalStateException("Cannot read shared photo")
++            var fileName: String? = null
++            var fileSize: String? = null
++            // Providers are allowed to omit SIZE, DISPLAY_NAME, or a query result.
++            runCatching { resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE), null, null, null)?.use { cursor ->
++                if (cursor.moveToFirst()) {
++                    val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
++                    val sizeIndex = cursor.getColumnIndex(OpenableColumns.SIZE)
++                    if (nameIndex >= 0) fileName = cursor.getString(nameIndex)
++                    if (sizeIndex >= 0) fileSize = cursor.getString(sizeIndex)
+                 }
+-                BitmapFactory.decodeStream(resolver.openInputStream(uri), null, options)
+-                mediaHeight = options.outHeight.toString()
+-                mediaWidth = options.outWidth.toString()
+             }
+-            if (mimeType.startsWith("video/")) {
+-                val retriever = MediaMetadataRetriever()
+-                retriever.setDataSource(instance?.getAbsolutePath(uri))
+-                mediaWidth = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toInt().toString() ?: null
+-                mediaHeight = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toInt().toString() ?: null
+-                // Check orientation and flip size if required
+-                val metaRotation = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)?.toInt() ?: 0;
+-                if (metaRotation == 90 || metaRotation == 270) {
+-                    mediaWidth = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toInt().toString() ?: null
+-                    mediaHeight = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toInt().toString() ?: null
+-                }
+-                mediaDuration = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toInt().toString() ?: null
+             }
+-
++            val extension = fileName?.substringAfterLast('.', "")?.lowercase()
++            val mimeType = resolver.getType(uri)
++                ?: extension?.let { MimeTypeMap.getSingleton().getMimeTypeFromExtension(it) }
++                ?: "application/octet-stream"
++            // Use the granted content URI, never a provider's inaccessible _data path.
++            // Unique names preserve different photos with the same display name.
++            val directory = File(instance!!.context.cacheDir, "TripSharedPhotos").apply { mkdirs() }
++            val suffix = extension?.takeIf { it.matches(Regex("[a-z0-9]{2,5}")) } ?: "img"
++            val target = File.createTempFile("shared-", ".$suffix", directory)
++            try {
++                val input = resolver.openInputStream(uri)
++                    ?: throw IllegalStateException("Shared photo is unavailable")
++                input.use { source -> target.outputStream().use { source.copyTo(it) } }
++            } catch (error: Exception) {
++                target.delete()
++                throw error
++            }
++            var width: String? = null
++            var height: String? = null
++            if (mimeType.startsWith("image/")) {
++                val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
++                BitmapFactory.decodeFile(target.path, options)
++                width = options.outWidth.toString()
++                height = options.outHeight.toString()
++            }
+             return mapOf(
+-                    "contentUri" to uri.toString(),
+-                    "filePath" to instance?.getAbsolutePath(uri),
+-                    "fileName" to fileName,
+-                    "fileSize" to fileSize,
+-                    "mimeType" to mimeType,
+-                    "width" to mediaWidth,
+-                    "height" to mediaHeight,
+-                    "duration" to mediaDuration
++                "contentUri" to uri.toString(),
++                "filePath" to target.path,
++                "fileName" to fileName,
++                "fileSize" to (fileSize ?: target.length().toString()),
++                "mimeType" to mimeType,
++                "width" to width,
++                "height" to height
+             )
+         }
+ 
+         fun handleShareIntent(intent: Intent) {
++            try {
++                readShareIntent(intent)
++            } catch (error: Exception) {
++                notifyError("Cannot read shared photo: ${error.message}")
++            }
++        }
++
++        private fun readShareIntent(intent: Intent) {
+             val activity = instance?.currentActivity
+             if (activity != null && !activity.isTaskRoot) {
+                 val newIntent = Intent(intent).apply {
+@@ -142,7 +145,7 @@ class ExpoShareIntentModule : Module() {
+                 if (intent.action == Intent.ACTION_SEND) {
+                     val uri = intent.parcelable<Uri>(Intent.EXTRA_STREAM);
+                     if (uri != null) {
+-                        notifyShareIntent(mapOf( "files" to arrayOf(getFileInfo(uri), "type" to "file")))
++                        notifyShareIntent(mapOf( "files" to arrayOf(getFileInfo(uri)), "type" to "file"))
+                     } else {
+                         notifyError("empty uri for file sharing: " + intent.action)
+                     }
 diff --git a/node_modules/expo-share-intent/build/useShareIntent.js b/node_modules/expo-share-intent/build/useShareIntent.js
 index 1ab12c4..18437d4 100644
 --- a/node_modules/expo-share-intent/build/useShareIntent.js

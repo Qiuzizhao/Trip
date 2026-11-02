@@ -10,6 +10,10 @@ npm-debug.*
 *.p12
 *.key
 *.mobileprovision
+android/local.properties
+android/.gradle/
+android/.cxx/
+android/**/build/
 *.orig.*
 web-build/
 

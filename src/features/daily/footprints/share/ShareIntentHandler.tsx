@@ -9,7 +9,7 @@ export function ShareIntentHandler() {
   const router = useRouter();
   const navigation = useRootNavigationState();
   const { hasShareIntent, shareIntent, resetShareIntent, error } = useShareIntent({
-    disabled: Platform.OS !== 'ios', resetOnBackground: false, scheme: 'tripfootprints',
+    disabled: Platform.OS === 'web', resetOnBackground: false, scheme: 'tripfootprints',
   });
   const busy = useRef(false);
   const handled = useRef<string | null>(null);

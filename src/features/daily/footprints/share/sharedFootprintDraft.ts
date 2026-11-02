@@ -10,7 +10,7 @@ export function sharedImageUris(files: SharedFile[] | null): string[] {
   return [...new Set((files ?? [])
     .filter((file) => file.mimeType?.startsWith('image/') || /\.(heic|heif|jpe?g|png|gif|webp|tiff?|bmp|avif)$/i.test(file.fileName ?? ''))
     .map((file) => file.path.startsWith('/') ? `file://${file.path}` : file.path)
-    .filter((uri) => uri.startsWith('file://')))];
+    .filter((uri) => /^(file|content):\/\//.test(uri)))];
 }
 
 // Copy every image before clearing the native inbox: never open an incomplete draft.

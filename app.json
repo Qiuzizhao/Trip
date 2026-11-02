@@ -20,7 +20,17 @@
       }
     },
     "android": {
+      "package": "com.qiuzizhao.tripfootprints",
       "versionCode": 37,
+      "softwareKeyboardLayoutMode": "resize",
+      "blockedPermissions": [
+        "android.permission.RECORD_AUDIO",
+        "android.permission.CAMERA",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.READ_MEDIA_IMAGES",
+        "android.permission.READ_MEDIA_VIDEO"
+      ],
       "adaptiveIcon": {
         "backgroundColor": "#FFFFFF",
         "foregroundImage": "./assets/images/app-icon-trip-white-route-v2.png"
@@ -49,6 +59,7 @@
       "expo-web-browser",
       "expo-asset",
       "expo-font",
+      "./plugins/with-android-signing",
       "./plugins/with-ios-scene-lifecycle",
       "./plugins/with-trip-share-extension"
     ],

@@ -30,6 +30,7 @@ module.exports = function withTripShareExtension(config) {
   });
   return withShareIntent(config, {
     iosActivationRules: { NSExtensionActivationSupportsImageWithMaxCount: 1000 },
-    disableAndroid: true,
+    androidIntentFilters: ['image/*'],
+    androidMultiIntentFilters: ['image/*'],
   });
 };

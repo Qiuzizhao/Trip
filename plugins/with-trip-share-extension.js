@@ -1,9 +1,23 @@
-const { withXcodeProject } = require('@expo/config-plugins');
+const { AndroidConfig, withAndroidManifest, withXcodeProject } = require('@expo/config-plugins');
 const withShareIntent = require('expo-share-intent/app.plugin').default;
 const fs = require('fs');
 const path = require('path');
 
 module.exports = function withTripShareExtension(config) {
+  config = withAndroidManifest(config, (config) => {
+    // The dependency appends filters on each prebuild; retain one of each.
+    const activity = AndroidConfig.Manifest.getMainActivityOrThrow(config.modResults);
+    const seen = new Set();
+    activity['intent-filter'] = activity['intent-filter']?.filter((filter) => {
+      const action = filter.action?.[0]?.$?.['android:name'];
+      if (!['android.intent.action.SEND', 'android.intent.action.SEND_MULTIPLE'].includes(action)) return true;
+      if (filter.data?.length !== 1 || filter.data[0].$?.['android:mimeType'] !== 'image/*') return true;
+      if (seen.has(action)) return false;
+      seen.add(action);
+      return true;
+    });
+    return config;
+  });
   // Mods run in reverse registration order: replace the controller after generation.
   config = withXcodeProject(config, (config) => {
     const root = config.modRequest.platformProjectRoot;

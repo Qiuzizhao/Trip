@@ -27,7 +27,7 @@ export function SystemAlbumScreen() {
         <Switch accessibilityLabel="本次恢复查找整个系统图库" value={searchEntireLibrary}
           disabled={busy} onValueChange={setSearchEntireLibrary} />
       </View>
-      <Text style={styles.muted}>已从系统图库删除的历史照片，重新保存时会把当前足迹地点加入文件名。仍存在的照片直接加回相簿，保留原文件名。</Text>
+      <Text style={styles.muted}>已从系统图库删除的历史照片，重新保存时会把当前足迹地点加入文件名。{Platform.OS === 'android' ? '其他目录中仍存在的照片会复制到 Trip，原件保留在原位置。' : '仍存在的照片直接加回相簿，保留原文件名。'}</Text>
       <PrimaryButton label={busy ? '处理中…' : '开始核对并恢复'} icon="images-outline"
         disabled={busy || !photoAlbumNative?.reconcileAlbum}
         onPress={() => { void restoreSystemAlbum(searchEntireLibrary); }} />

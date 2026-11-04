@@ -100,6 +100,7 @@ class TripPhotoAlbumModule : Module() {
     AsyncFunction("deleteDuplicates") { token: String, promise: Promise ->
       scope.launch {
         try {
+          check(Build.VERSION.SDK_INT >= 30) { "安全清理需要 Android 11 或以上版本" }
           val uris = synchronized(lock) { validatedDeletions(token) }
           if (uris.isEmpty()) { promise.resolve(0); return@launch }
           if (Build.VERSION.SDK_INT >= 30) {
@@ -111,11 +112,6 @@ class TripPhotoAlbumModule : Module() {
               try { activity.startIntentSenderForResult(request.intentSender, deleteRequestCode, null, 0, 0, 0) }
               catch (error: Exception) { deletion = null; throw error }
             }
-          } else {
-            // Older Android has no trash API. Only app-owned, byte-identical copies are eligible.
-            var count = 0
-            for (uri in uris) count += resolver.delete(uri, null, null)
-            promise.resolve(count)
           }
         } catch (error: Exception) { promise.reject("TRIP_DELETE", error.message, error) }
       }
@@ -285,6 +281,7 @@ class TripPhotoAlbumModule : Module() {
     return mapOf("hashes" to verified.keys().asSequence().toList(), "unresolved" to unresolved)
   }
   private fun scan(): Map<String, Any> {
+    check(Build.VERSION.SDK_INT >= 30) { "安全清理需要 Android 11 或以上版本，以保护收藏并使用系统回收站" }
     requirePermission()
     cancelled.set(false)
     preview = null

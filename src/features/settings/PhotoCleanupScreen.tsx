@@ -31,7 +31,7 @@ export function PhotoCleanupScreen() {
   }, []);
 
   const scan = async () => {
-    if (!native?.findDuplicates || busy) return;
+    if (oldAndroid || !native?.findDuplicates || busy) return;
     setBusy(true);
     setPreview(null);
     setMessage('');
@@ -59,7 +59,7 @@ export function PhotoCleanupScreen() {
     const current = preview;
     Alert.alert(`删除 ${current.removeCount} 张重复副本？`,
       android
-        ? `每组至少保留一张，收藏、内容已变化和来源不明的照片会保留。仅清理 Trip 创建的副本。${oldAndroid ? '此安卓版本没有系统回收站，删除副本后无法从回收站恢复。' : '还需在系统弹窗中确认，副本会进入系统回收站。'}`
+        ? `每组至少保留一张，收藏、内容已变化和来源不明的照片会保留。仅清理 Trip 创建的副本。还需在系统弹窗中确认，副本会进入系统回收站。`
         : '每组至少保留一张，收藏、已编辑及无法确认来源的照片会保留。删除也会影响这些副本所在的其他相簿，并同步到 iCloud；照片会进入系统“最近删除”。', [
         { text: '取消', style: 'cancel' },
         { text: '继续', style: 'destructive', onPress: () => {
@@ -68,7 +68,7 @@ export function PhotoCleanupScreen() {
           void native!.deleteDuplicates!(current.token).then((count) => {
             if (alive.current) {
               setPreview(null);
-              setMessage(count ? `已清理 ${count} 张重复副本。${oldAndroid ? '每组原件均已保留。' : android ? '可在系统相册回收站中恢复。' : '可在系统相册“最近删除”中恢复。'}` : '已取消清理，照片未删除。');
+              setMessage(count ? `已清理 ${count} 张重复副本。${android ? '可在系统相册回收站中恢复。' : '可在系统相册“最近删除”中恢复。'}` : '已取消清理，照片未删除。');
             }
           }).catch((error: unknown) => {
             if (alive.current) {
@@ -88,9 +88,9 @@ export function PhotoCleanupScreen() {
       contentContainerStyle={styles.content}
       ListHeaderComponent={<View style={styles.header}>
         <Text style={styles.explanation}>只扫描系统相册的 Trip 相簿。核对原文件内容完全一致后，仅清理可确认由 Trip 生成的重复副本，每组至少保留一张。</Text>
-        <Text style={styles.muted}>收藏、内容已变化、来源不明及暂时无法读取的照片会保留。{oldAndroid ? '此版本会永久删除确认的副本，每组至少保留一张。' : '删除前还会弹出系统确认。'}</Text>
+        <Text style={styles.muted}>{oldAndroid ? '安全清理需要 Android 11 或以上版本，以识别系统收藏并使用回收站。当前版本仍可保存和恢复 Trip 相簿。' : '收藏、内容已变化、来源不明及暂时无法读取的照片会保留。删除前还会弹出系统确认。'}</Text>
         <PrimaryButton label={busy ? (deleting ? '等待系统删除确认…' : '扫描中…') : '扫描 Trip 重复照片'}
-          icon="search-outline" disabled={busy || !native?.findDuplicates} onPress={() => { void scan(); }} />
+          icon="search-outline" disabled={oldAndroid || busy || !native?.findDuplicates} onPress={() => { void scan(); }} />
         {busy && <View style={styles.progress}><ActivityIndicator color={colors.primary} />
           <Text style={styles.muted}>{deleting ? '请在系统弹窗中确认' : `正在核对 ${progress.scanned} / ${progress.total} 张照片`}</Text>
         </View>}

@@ -1,5 +1,5 @@
 import React from 'react';
-import { Alert } from 'react-native';
+import { Alert, Platform } from 'react-native';
 import { act, create } from 'react-test-renderer';
 import { photoAlbumNative as native } from '@/src/features/daily/footprints/systemAlbum/native';
 import { PhotoCleanupScreen } from './PhotoCleanupScreen';
@@ -59,4 +59,20 @@ test('only explicit confirmation can submit the opaque native deletion plan', as
   await act(async () => { continueAction.onPress(); });
   expect(native.deleteDuplicates).toHaveBeenCalledTimes(1);
   expect(native.deleteDuplicates).toHaveBeenCalledWith('native-reviewed-plan');
+});
+
+ test('older Android disables cleanup when system favorite protection and trash are unavailable', async () => {
+  const os = Object.getOwnPropertyDescriptor(Platform, 'OS');
+  const version = Object.getOwnPropertyDescriptor(Platform, 'Version');
+  Object.defineProperty(Platform, 'OS', { configurable: true, value: 'android' });
+  Object.defineProperty(Platform, 'Version', { configurable: true, value: 28 });
+  try {
+    await act(async () => { tree = create(<PhotoCleanupScreen />); });
+    expect(tree.root.findByProps({ testID: '扫描 Trip 重复照片' }).props.disabled).toBe(true);
+    expect(native.findDuplicates).not.toHaveBeenCalled();
+  } finally {
+    await act(async () => { tree?.unmount(); tree = undefined; });
+    if (os) Object.defineProperty(Platform, 'OS', os);
+    if (version) Object.defineProperty(Platform, 'Version', version); else delete Platform.Version;
+  }
 });

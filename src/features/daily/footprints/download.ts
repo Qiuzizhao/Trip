@@ -46,8 +46,16 @@ export async function shareFootprintImage(uri: string) {
     shareUri = downloadResult.uri;
   }
 
+  const extension = await readImageExtension(shareUri) || fileExtensionForUri(shareUri);
+  if (extension !== fileExtensionForUri(shareUri)) {
+    if (!FileSystem.cacheDirectory) throw new Error('无法访问本地缓存目录');
+    const corrected = `${FileSystem.cacheDirectory}trip-share-${Date.now()}-${Math.random().toString(36).slice(2)}.${extension}`;
+    // Keep the filename and MIME consistent for receivers that rely on either one.
+    await FileSystem.copyAsync({ from: shareUri, to: corrected });
+    shareUri = corrected;
+  }
   await Sharing.shareAsync(shareUri, {
-    mimeType: imageMimeType(await readImageExtension(shareUri) || fileExtensionForUri(shareUri)),
+    mimeType: imageMimeType(extension),
     dialogTitle: '下载图片',
     UTI: 'public.image',
   });

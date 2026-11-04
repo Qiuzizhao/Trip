@@ -1,11 +1,37 @@
 diff --git a/node_modules/expo-share-intent/android/src/main/java/expo/modules/shareintent/ExpoShareIntentModule.kt b/node_modules/expo-share-intent/android/src/main/java/expo/modules/shareintent/ExpoShareIntentModule.kt
 --- a/node_modules/expo-share-intent/android/src/main/java/expo/modules/shareintent/ExpoShareIntentModule.kt
 +++ b/node_modules/expo-share-intent/android/src/main/java/expo/modules/shareintent/ExpoShareIntentModule.kt
-@@ -55,63 +55,66 @@
-             instance!!.sendEvent("onError", mapOf("value" to message))
-         }
+@@ -32,9 +32,11 @@
+ import java.io.File
+ import java.io.FileOutputStream
+ import java.util.Date
++import java.util.concurrent.Executors
  
+ 
+ class ExpoShareIntentModule : Module() {
++    private val shareWorker = Executors.newSingleThreadExecutor()
+     private val context: Context
+         get() = appContext.reactContext ?: throw Exceptions.ReactContextLost()
+ 
+@@ -46,79 +48,96 @@
+ 
+         private fun notifyShareIntent(value: Any) {
+             notifyState("pending")
+-            instance!!.sendEvent("onChange", mapOf("value" to value))
++            instance?.sendEvent("onChange", mapOf("value" to value))
+         }
+         private fun notifyState(state: String) {
+-            instance!!.sendEvent("onStateChange", mapOf("value" to state))
++            instance?.sendEvent("onStateChange", mapOf("value" to state))
+         }
+         private fun notifyError(message: String) {
+-            instance!!.sendEvent("onError", mapOf("value" to message))
+-        }
+-
 -        @SuppressLint("Range")
++            instance?.sendEvent("onError", mapOf("value" to message))
++        }
++
          private fun getFileInfo(uri: Uri): Map<String, String?> {
 -            val resolver: ContentResolver? = instance?.currentActivity?.contentResolver
 -                    ?: instance?.context?.contentResolver
@@ -48,7 +74,8 @@ diff --git a/node_modules/expo-share-intent/android/src/main/java/expo/modules/s
 +            // Use the granted content URI, never a provider's inaccessible _data path.
 +            // Unique names preserve different photos with the same display name.
 +            val directory = File(instance!!.context.cacheDir, "TripSharedPhotos").apply { mkdirs() }
-+            val suffix = extension?.takeIf { it.matches(Regex("[a-z0-9]{2,5}")) } ?: "img"
++            val suffix = MimeTypeMap.getSingleton().getExtensionFromMimeType(mimeType)
++                ?: extension?.takeIf { it.matches(Regex("[a-z0-9]{2,5}")) } ?: "img"
 +            val target = File.createTempFile("shared-", ".$suffix", directory)
 +            try {
 +                val input = resolver.openInputStream(uri)
@@ -106,6 +133,17 @@ diff --git a/node_modules/expo-share-intent/android/src/main/java/expo/modules/s
              )
          }
  
++        private fun readFiles(uris: List<Uri>): List<Map<String, String?>> {
++            val files = mutableListOf<Map<String, String?>>()
++            try {
++                for (uri in uris) files.add(getFileInfo(uri))
++                return files
++            } catch (error: Exception) {
++                files.forEach { it["filePath"]?.let { path -> File(path).delete() } }
++                throw error
++            }
++        }
++
          fun handleShareIntent(intent: Intent) {
 +            try {
 +                readShareIntent(intent)
@@ -118,15 +156,76 @@ diff --git a/node_modules/expo-share-intent/android/src/main/java/expo/modules/s
              val activity = instance?.currentActivity
              if (activity != null && !activity.isTaskRoot) {
                  val newIntent = Intent(intent).apply {
-@@ -142,7 +145,7 @@
+                     addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                 }
+-                activity.startActivity(newIntent)
+-                activity.finish()
++                activity.runOnUiThread {
++                    activity.startActivity(newIntent)
++                    activity.finish()
++                }
+                 return
+             }
+             if (intent.type == null) return
+@@ -142,14 +161,14 @@
                  if (intent.action == Intent.ACTION_SEND) {
                      val uri = intent.parcelable<Uri>(Intent.EXTRA_STREAM);
                      if (uri != null) {
 -                        notifyShareIntent(mapOf( "files" to arrayOf(getFileInfo(uri), "type" to "file")))
-+                        notifyShareIntent(mapOf( "files" to arrayOf(getFileInfo(uri)), "type" to "file"))
++                        notifyShareIntent(mapOf( "files" to readFiles(listOf(uri)), "type" to "file"))
                      } else {
                          notifyError("empty uri for file sharing: " + intent.action)
                      }
+                 } else if (intent.action == Intent.ACTION_SEND_MULTIPLE) {
+                     val uris = intent.parcelableArrayList<Uri>(Intent.EXTRA_STREAM)
+                     if (uris != null) {
+-                        notifyShareIntent(mapOf( "files" to uris.map { getFileInfo(it) }, "type" to "file"))
++                        notifyShareIntent(mapOf( "files" to readFiles(uris), "type" to "file"))
+                     } else {
+                         notifyError("empty uris array for file sharing: " + intent.action)
+                     }
+@@ -179,13 +198,16 @@
+ 
+         Events("onChange", "onStateChange", "onError")
+ 
+-        AsyncFunction("getShareIntent") { _: String ->
+-            // get the Intent from onCreate activity (app not running in background)
++        AsyncFunction("getShareIntent") { _: String, promise: expo.modules.kotlin.Promise ->
+             ExpoShareIntentSingleton.isPending = false
+-            if (ExpoShareIntentSingleton.intent?.type != null) {
+-                handleShareIntent(ExpoShareIntentSingleton.intent!!);
+-                ExpoShareIntentSingleton.intent = null
+-            }
++            val pending = ExpoShareIntentSingleton.intent
++            ExpoShareIntentSingleton.intent = null
++            if (pending?.type != null) {
++                shareWorker.execute {
++                    handleShareIntent(pending)
++                    promise.resolve(null)
++                }
++            } else promise.resolve(null)
+         }
+ 
+         Function("clearShareIntent") { _: String ->
+@@ -196,8 +218,8 @@
+             ExpoShareIntentSingleton.isPending
+         }
+ 
+-        OnNewIntent {
+-            handleShareIntent(it)
++        OnNewIntent { intent ->
++            shareWorker.execute { handleShareIntent(intent) }
+         }
+ 
+         OnCreate {
+@@ -205,6 +227,7 @@
+         }
+ 
+         OnDestroy {
++            shareWorker.shutdownNow()
+             instance = null
+         }
+     }
 diff --git a/node_modules/expo-share-intent/build/useShareIntent.js b/node_modules/expo-share-intent/build/useShareIntent.js
 --- a/node_modules/expo-share-intent/build/useShareIntent.js
 +++ b/node_modules/expo-share-intent/build/useShareIntent.js

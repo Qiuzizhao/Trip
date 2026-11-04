@@ -15,6 +15,9 @@ android/.gradle/
 android/.kotlin/
 android/.cxx/
 android/**/build/
+modules/**/android/build/
+modules/**/android/.gradle/
+modules/**/android/.cxx/
 *.orig.*
 web-build/
 

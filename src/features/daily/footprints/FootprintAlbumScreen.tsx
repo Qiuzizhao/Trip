@@ -10,6 +10,7 @@ import { Item, ScreenShell } from '../_shared/ReplicatedScreens';
 import { postcardColors, postcardShadowSoft, styles as shared } from '../_shared/styles';
 import { FootprintImagePreviewModal } from './FootprintImagePreviewModal';
 import { FootprintThumbnail } from './FootprintThumbnail';
+import { FootprintCoverPicker } from './FootprintCoverPicker';
 import { resolveFootprintImages, type PreviewImage } from './assetResolver';
 import { shareFootprintImage } from './download';
 import { footprintDisplayImageUri } from './imageCache';
@@ -54,6 +55,7 @@ export function FootprintAlbumScreen({
   const [error, setError] = useState<string | null>(null);
   const [fullIndex, setFullIndex] = useState<number | null>(null);
   const [resolvedImages, setResolvedImages] = useState<PreviewImage[] | null>(null);
+  const [choosingDownload, setChoosingDownload] = useState(false);
   const [sharing, setSharing] = useState(false);
 
   const loadItem = async () => {
@@ -128,21 +130,7 @@ export function FootprintAlbumScreen({
       void shareImageAt(images[0]);
       return;
     }
-    const MAX_CHOICES = 6;
-    const choices = imageItems.slice(0, MAX_CHOICES).map((entry, index) => {
-      const time = timeLabel(entry.takenAt);
-      return {
-        text: `第 ${index + 1} 张${time ? ` · ${time}` : ''}`,
-        onPress: () => { void shareImageAt(entry.uri); },
-      };
-    });
-    Alert.alert(
-      '下载原图',
-      images.length > MAX_CHOICES
-        ? `这条足迹有 ${images.length} 张照片，这里先列前 ${MAX_CHOICES} 张；其余的点开照片，在全屏预览里逐张下载。`
-        : `这条足迹有 ${images.length} 张照片，选择要下载的那一张。`,
-      [...choices, { text: '取消', style: 'cancel' as const }],
-    );
+    setChoosingDownload(true);
   };
 
   const header = item ? (
@@ -310,6 +298,10 @@ export function FootprintAlbumScreen({
         ) : null}
       </View>
 
+      <FootprintCoverPicker visible={choosingDownload} images={images} purpose="download"
+        onClose={() => setChoosingDownload(false)} onSelect={(uri) => {
+          setChoosingDownload(false); void shareImageAt(uri);
+        }} />
       <FootprintImagePreviewModal
         initialIndex={fullIndex ?? 0}
         items={fullIndex === null ? [] : imageItems}

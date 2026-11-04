@@ -7,12 +7,13 @@ import { postcardColors } from '../_shared/styles';
 import { FootprintThumbnail } from './FootprintThumbnail';
 
 export function FootprintCoverPicker({
-  visible, images, onSelect, onClose,
+  visible, images, onSelect, onClose, purpose = 'cover',
 }: {
   visible: boolean;
   images: string[];
   onSelect: (uri: string) => void;
   onClose: () => void;
+  purpose?: 'cover' | 'download';
 }) {
   const { width } = useWindowDimensions();
   const cardWidth = Math.min(width - 32, 560);
@@ -22,8 +23,8 @@ export function FootprintCoverPicker({
       <View style={styles.backdrop}>
         <Pressable accessibilityLabel="关闭首图选择" onPress={onClose} style={StyleSheet.absoluteFill} />
         <View accessibilityViewIsModal style={[styles.card, { width: cardWidth }]}>
-          <Text accessibilityRole="header" style={styles.title}>设置首图</Text>
-          <Text style={styles.hint}>选择一张照片作为足迹封面</Text>
+          <Text accessibilityRole="header" style={styles.title}>{purpose === 'download' ? '下载原图' : '设置首图'}</Text>
+          <Text style={styles.hint}>{purpose === 'download' ? '选择要下载的照片' : '选择一张照片作为足迹封面'}</Text>
           <FlatList
             data={images}
             numColumns={3}
@@ -32,14 +33,14 @@ export function FootprintCoverPicker({
             columnWrapperStyle={{ gap: 10 }}
             renderItem={({ item: uri, index }) => (
               <Pressable
-                accessibilityLabel={`第 ${index + 1} 张照片${index === 0 ? '，当前首图' : '，设为首图'}`}
+                accessibilityLabel={purpose === 'download' ? `下载第 ${index + 1} 张照片` : `第 ${index + 1} 张照片${index === 0 ? '，当前首图' : '，设为首图'}`}
                 accessibilityRole="button"
-                accessibilityState={{ selected: index === 0 }}
+                accessibilityState={purpose === 'cover' ? { selected: index === 0 } : undefined}
                 onPress={() => onSelect(uri)}
-                style={[styles.photo, { width: photoSize, height: photoSize }, index === 0 && styles.selected]}
+                style={[styles.photo, { width: photoSize, height: photoSize }, purpose === 'cover' && index === 0 && styles.selected]}
               >
                 <FootprintThumbnail uri={buildAssetUrl(uri) || uri} style={{ width: '100%', height: '100%' }} />
-                {index === 0 ? (
+                {purpose === 'cover' && index === 0 ? (
                   <View pointerEvents="none" style={styles.badge}>
                     <Ionicons name="checkmark" size={13} color="#fff" />
                     <Text style={styles.badgeText}>首图</Text>

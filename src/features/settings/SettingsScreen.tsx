@@ -66,7 +66,7 @@ export function SettingsScreen() {
               value={settings.localOnlyMode}
             />
           </View>
-          {Platform.OS === 'ios' && <Pressable
+          {Platform.OS !== 'web' && <Pressable
             accessibilityLabel="Trip 系统相簿设置"
             onPress={() => router.push('/settings/system-album' as never)}
             style={({ pressed }) => [styles.settingRow, pressed && styles.cardPressed]}
@@ -80,7 +80,7 @@ export function SettingsScreen() {
             </View>
             <Ionicons name="chevron-forward" size={19} color={colors.muted} />
           </Pressable>}
-          {Platform.OS === 'ios' && <Pressable
+          {Platform.OS !== 'web' && <Pressable
             onPress={() => router.push('/settings/photo-cleanup' as never)}
             style={({ pressed }) => [styles.settingRow, pressed && styles.cardPressed]}
           >

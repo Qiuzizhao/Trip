@@ -1,6 +1,6 @@
 import { router } from 'expo-router';
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, Linking, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
+import { ActivityIndicator, Linking, Platform, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 
 import { photoAlbumNative } from '@/src/features/daily/footprints/systemAlbum/native';
 import { getSystemAlbumState, restoreSystemAlbum, subscribeSystemAlbum } from '@/src/features/daily/footprints/systemAlbum/sync';
@@ -18,6 +18,7 @@ export function SystemAlbumScreen() {
     <Header title="Trip 系统相簿" action={<IconButton name="chevron-back" label="返回设置" transparent onPress={() => router.back()} />} />
     <ScrollView contentContainerStyle={styles.content}>
       <Text style={styles.text}>点击下方按钮才开始核对和恢复。默认核对 Trip 相簿，并按已有保存记录定向确认照片，不遍历整个系统图库。</Text>
+      {Platform.OS === 'android' && <Text style={styles.muted}>安卓相簿对应 Pictures/Trip 目录。恢复其他相簿中的照片时会复制到 Trip，保留原件和原位置。</Text>}
       <View style={styles.row}>
         <View style={styles.details}>
           <Text style={styles.title}>本次恢复查找整个系统图库</Text>

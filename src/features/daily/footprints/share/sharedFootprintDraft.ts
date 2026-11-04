@@ -19,7 +19,10 @@ export async function createSharedFootprintDraft(files: SharedFile[] | null): Pr
   if (!sources.length) throw new Error('没有收到可导入的照片，请在相册中重新分享。');
   const images: string[] = [];
   try {
-    for (const source of sources) images.push(await persistFootprintImageUri(source));
+    for (const source of sources) {
+      const file = files?.find((file) => file.path === source || `file://${file.path}` === source);
+      images.push(await persistFootprintImageUri(source, file));
+    }
     const id = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
     await AsyncStorage.setItem(draftKey(id), JSON.stringify(images));
     // The extension inbox can be cleared only after the durable draft is written.

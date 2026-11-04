@@ -4,14 +4,15 @@ import { Platform } from 'react-native';
 const mockNativeRead = jest.fn<(uri: string) => Promise<{ dateTime: string; offset: string } | null>>();
 const mockArrayBuffer = jest.fn<() => Promise<ArrayBuffer>>();
 const mockFile = { size: 1024, arrayBuffer: mockArrayBuffer };
-jest.mock('expo-modules-core', () => ({ requireOptionalNativeModule: () => ({ readImageDateMetadata: (uri: string) => mockNativeRead(uri) }) }));
+const mockAndroidModule: { readImageDateMetadata?: (uri: string) => Promise<{ dateTime: string; offset: string } | null> } = {};
+jest.mock('expo-modules-core', () => ({ requireOptionalNativeModule: (name: string) => name === 'TripPhotoAlbum' ? { get readImageDateMetadata() { return mockAndroidModule.readImageDateMetadata; } } : ({ readImageDateMetadata: (uri: string) => mockNativeRead(uri) }) }));
 jest.mock('expo-file-system', () => ({ File: jest.fn(() => mockFile) }));
 
 import { MAX_METADATA_FALLBACK_BYTES, readTakenAtFromFile } from '../imageMetadata';
 const originalOS = Object.getOwnPropertyDescriptor(Platform, 'OS')!;
 const setOS = (value: 'ios' | 'android') => Object.defineProperty(Platform, 'OS', { configurable: true, value });
 beforeEach(() => {
-  jest.clearAllMocks(); setOS('ios'); mockFile.size = 1024;
+  jest.clearAllMocks(); delete mockAndroidModule.readImageDateMetadata; setOS('ios'); mockFile.size = 1024;
   mockNativeRead.mockResolvedValue({ dateTime: '2026:10:13 09:30:00', offset: '+08:00' });
   mockArrayBuffer.mockResolvedValue(new ArrayBuffer(0));
 });
@@ -51,5 +52,12 @@ it('fallback skips oversized files rather than allocating them', async () => {
 it('does not fetch remote originals for metadata', async () => {
   expect(await readTakenAtFromFile('https://example.com/photo.jpg')).toBeNull();
   expect(mockNativeRead).not.toHaveBeenCalled();
+  expect(mockArrayBuffer).not.toHaveBeenCalled();
+});
+
+ it('Android reads oversized photos through native EXIF without loading originals into JS', async () => {
+  setOS('android'); mockFile.size = MAX_METADATA_FALLBACK_BYTES + 1;
+  mockAndroidModule.readImageDateMetadata = (uri) => mockNativeRead(uri);
+  expect(await readTakenAtFromFile('file:///large.heic')).toBe(Date.UTC(2026, 9, 13, 1, 30));
   expect(mockArrayBuffer).not.toHaveBeenCalled();
 });

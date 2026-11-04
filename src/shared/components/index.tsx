@@ -145,7 +145,7 @@ const componentStyles = {
   },
   dateValuePaper: {
     color: '#23292F',
-    fontFamily: 'Menlo',
+    fontFamily: Platform.select({ ios: 'Menlo', default: 'monospace' }),
     fontSize: 15,
     fontWeight: '700' as const,
     letterSpacing: 0.5,

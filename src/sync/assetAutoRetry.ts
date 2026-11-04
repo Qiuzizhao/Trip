@@ -9,6 +9,7 @@ import AsyncActionQueue from '@/src/vendor/joplin/AsyncActionQueue';
 import { runAssetSync } from './assetQueue';
 import { createSupabaseFileApi, SUPABASE_SYNC_TARGET_ID } from './supabase/fileApiFactory';
 import { getCurrentSession } from './supabaseClient';
+import { withAccountDataLock } from './accountDataLock';
 
 let queue: AsyncActionQueue<void> | null = null;
 let running = false;
@@ -36,15 +37,17 @@ export async function runAssetRetryNow(): Promise<AssetRetryResult> {
   if (running) return null;
   running = true;
   try {
-    // 本地模式：不做任何网络同步（含上传与下载）
-    if (await isLocalOnlyMode()) return null;
-    const session = await getCurrentSession();
-    if (!session?.user) return null;
-    if (!(await hasPendingWork())) return null;
+    return await withAccountDataLock(async () => {
+      // 本地模式：不做任何网络同步（含上传与下载）
+      if (await isLocalOnlyMode()) return null;
+      const session = await getCurrentSession();
+      if (!session?.user) return null;
+      if (!(await hasPendingWork())) return null;
 
-    const fileApi = await createSupabaseFileApi();
-    const result = await runAssetSync({ fileApi, userId: session.user.id, syncTargetId: SUPABASE_SYNC_TARGET_ID });
-    return { ran: true, uploaded: result.uploaded, downloaded: result.downloaded, failed: result.failed };
+      const fileApi = await createSupabaseFileApi();
+      const result = await runAssetSync({ fileApi, userId: session.user.id, syncTargetId: SUPABASE_SYNC_TARGET_ID });
+      return { ran: true, uploaded: result.uploaded, downloaded: result.downloaded, failed: result.failed };
+    });
   } catch {
     // 自动重试失败保持静默，等下一个触发源
     return null;

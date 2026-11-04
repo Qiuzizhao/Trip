@@ -10,6 +10,9 @@ import { Platform } from 'react-native';
 const metadataModule = requireOptionalNativeModule<{
   readImageDateMetadata?: (uri: string) => Promise<{ dateTime: string; offset: string } | null>;
 }>('ExpoShareIntentModule');
+const androidMetadataModule = requireOptionalNativeModule<{
+  readImageDateMetadata?: (uri: string) => Promise<{ dateTime: string; offset: string } | null>;
+}>('TripPhotoAlbum');
 
 export const MAX_METADATA_FALLBACK_BYTES = 16 * 1024 * 1024;
 let metadataQueue: Promise<unknown> = Promise.resolve();
@@ -78,9 +81,10 @@ async function readImageBytes(uri: string): Promise<ArrayBuffer | null> {
 
 async function readTakenAt(uri: string): Promise<number | null> {
   if (!uri.startsWith('file://')) return null;
-  if (Platform.OS === 'ios' && metadataModule?.readImageDateMetadata) {
+  const native = Platform.OS === 'android' ? androidMetadataModule : metadataModule;
+  if (native?.readImageDateMetadata) {
     try {
-      const metadata = await metadataModule.readImageDateMetadata(uri);
+      const metadata = await native.readImageDateMetadata(uri);
       return metadata ? parseExifDateTime(metadata.dateTime, metadata.offset) : null;
     } catch {
       // Metadata is optional. Never fall back to reading an entire large original.

@@ -14,7 +14,7 @@ import { Item, ScreenShell, confirmRemove, today } from '../_shared/ReplicatedSc
 import { FootprintImagePreviewModal } from './FootprintImagePreviewModal';
 import { FootprintCoverPicker } from './FootprintCoverPicker';
 import { FootprintThumbnail } from './FootprintThumbnail';
-import { persistFootprintImageUri } from './footprintImageFiles';
+import { beginImagePicker, finishImagePicker, persistPickedImages, readPickerRecovery } from './imagePickerRecovery';
 import { collectTagCounts, formatTagsInput, normalizeTags, parseTagInput } from './footprintTags';
 import { readSharedFootprintDraft } from './share/sharedFootprintDraft';
 import { cityKey, collectCityCounts } from './footprintCities';
@@ -92,10 +92,12 @@ async function findFootprintById(id: string) {
 export function FootprintEditorScreen({
   footprintId,
   sharedDraftId,
+  recoveryDraftId,
   onBack,
 }: {
   footprintId?: string | null;
   sharedDraftId?: string;
+  recoveryDraftId?: string;
   onBack: () => void;
 }) {
   const isEditing = typeof footprintId === 'string' && Boolean(footprintId);
@@ -174,7 +176,7 @@ export function FootprintEditorScreen({
   }, [form.image_urls, takenAtByUri]);
 
   useEffect(() => {
-    if (!isEditing || typeof footprintId !== 'string') return;
+    if (recoveryDraftId || !isEditing || typeof footprintId !== 'string') return;
     let mounted = true;
     setLoading(true);
     setError(null);
@@ -199,7 +201,18 @@ export function FootprintEditorScreen({
     return () => {
       mounted = false;
     };
-  }, [footprintId, isEditing]);
+  }, [footprintId, isEditing, recoveryDraftId]);
+
+  useEffect(() => {
+    if (!recoveryDraftId) return;
+    let mounted = true;
+    setLoading(true);
+    void readPickerRecovery(recoveryDraftId)
+      .then((restored) => { if (mounted) setForm(restored as FootprintForm); })
+      .catch((err) => { if (mounted) setError(err instanceof Error ? err.message : '恢复照片失败'); })
+      .finally(() => { if (mounted) setLoading(false); });
+    return () => { mounted = false; };
+  }, [recoveryDraftId]);
 
   useEffect(() => {
     if (isEditing || !sharedDraftId) return;
@@ -222,6 +235,7 @@ export function FootprintEditorScreen({
           return;
         }
       }
+      await beginImagePicker(footprintId, form);
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ['images'],
         allowsMultipleSelection: true,
@@ -229,10 +243,12 @@ export function FootprintEditorScreen({
         quality: 1,
       });
       if (result.canceled || !result.assets[0]) return;
-      const selectedUris = await Promise.all(result.assets.map((asset) => persistFootprintImageUri(asset.uri)));
+      const selectedUris = await persistPickedImages(result.assets);
       setForm((current) => ({ ...current, image_urls: imageList([...current.image_urls, ...selectedUris]) }));
     } catch (err) {
       Alert.alert('保存照片失败', err instanceof Error ? err.message : '请稍后重试。');
+    } finally {
+      await finishImagePicker().catch(() => undefined);
     }
   };
 

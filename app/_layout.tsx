@@ -6,6 +6,7 @@ import { View } from 'react-native';
 
 import { startSystemAlbumSync } from '@/src/features/daily/footprints/systemAlbum/sync';
 import { ShareIntentHandler } from '@/src/features/daily/footprints/share/ShareIntentHandler';
+import { ImagePickerRecoveryHandler } from '@/src/features/daily/footprints/imagePickerRecovery';
 
 import { prewarmFootprintScreenData } from '@/src/local/homePreload';
 import { startAssetAutoRetry } from '@/src/sync/assetAutoRetry';
@@ -37,6 +38,7 @@ export default function RootLayout() {
         <Stack.Screen name="auth" options={{ animation: 'slide_from_left' }} />
       </Stack>
       <ShareIntentHandler />
+      <ImagePickerRecoveryHandler />
     </View>
   );
 }

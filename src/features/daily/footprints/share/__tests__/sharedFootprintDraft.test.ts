@@ -35,7 +35,7 @@ it('accepts Android content URIs and copies them before the share grant expires'
   expect(sharedImageUris([file(uri), file(uri), file('https://example.com/photo.jpg')])).toEqual([uri]);
   jest.mocked(persistFootprintImageUri).mockResolvedValueOnce('file:///documents/android.jpg');
   const id = await createSharedFootprintDraft([file(uri)]);
-  expect(persistFootprintImageUri).toHaveBeenCalledWith(uri);
+  expect(persistFootprintImageUri).toHaveBeenCalledWith(uri, expect.objectContaining({ mimeType: 'image/jpeg' }));
   expect(AsyncStorage.setItem).toHaveBeenCalledWith(`trip:shared-footprint:${id}`, JSON.stringify(['file:///documents/android.jpg']));
   expect(FileSystem.deleteAsync).not.toHaveBeenCalledWith(uri, expect.anything());
 });

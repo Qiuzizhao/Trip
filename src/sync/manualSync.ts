@@ -4,6 +4,7 @@
 //   3) 资产级：blob -> Storage + <assetId>.md 元数据项；远端有元数据而本地缺图时下载恢复
 //   4) 合并远端记录
 import { listAllAssets } from '@/src/local/repositories/assetRepository';
+import { withAccountDataLock } from './accountDataLock';
 import { isLocalOnlyMode } from '@/src/local/repositories/appSettingsRepository';
 import { migrateFootprintImagesToAssets } from '@/src/local/repositories/assetMigration';
 import { listFootprintsForSync, replaceFootprintsFromSync, type FootprintItem } from '@/src/local/repositories/footprintsRepository';
@@ -87,6 +88,10 @@ export async function runManualSync({
   /** 同步进度回调：只给「同步中」弹窗用，不影响同步结果 */
   onProgress?: SyncProgressListener;
 } = {}): Promise<ManualSyncResult> {
+  return withAccountDataLock(() => runManualSyncUnlocked(onProgress));
+}
+
+async function runManualSyncUnlocked(onProgress?: SyncProgressListener): Promise<ManualSyncResult> {
   if (!isSupabaseConfigured()) {
     throw new Error('还没有配置 Supabase。请设置 EXPO_PUBLIC_SUPABASE_URL 和 EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY。');
   }

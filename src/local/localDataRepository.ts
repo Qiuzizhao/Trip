@@ -1,3 +1,7 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { clearAssets } from './repositories/assetRepository';
+import { homePreloadKeys, setPreloadedData } from './homePreload';
+
 import { clearFootprintsLocal, listFootprintsLocal } from './repositories/footprintsRepository';
 import { clearSyncMetadata, getSyncMetadata, type SyncMetadata } from './syncMetadataRepository';
 
@@ -23,6 +27,11 @@ export async function clearAccountLocalData() {
   const [, metadata] = await Promise.all([
     clearFootprintsLocal(),
     clearSyncMetadata(),
+    clearAssets(),
   ]);
+  const keys = (await AsyncStorage.getAllKeys()).filter((key) =>
+    key.startsWith('trip-footprints.syncContext.') || key === 'trip-footprints.assetsMigratedAt');
+  if (keys.length) await AsyncStorage.multiRemove(keys);
+  setPreloadedData(homePreloadKeys.footprints, []);
   return { metadata };
 }

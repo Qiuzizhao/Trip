@@ -1,4 +1,5 @@
 import * as FileSystem from 'expo-file-system/legacy';
+import { imageExtension, readImageExtension, type ImageFileHint } from './imageFormat';
 
 export const FOOTPRINT_IMAGE_DIR = 'trip-footprint-images';
 const IMAGE_DIR = FOOTPRINT_IMAGE_DIR;
@@ -29,15 +30,8 @@ function isLocalUri(uri: string) {
   return /^(file|content):\/\//i.test(uri);
 }
 
-function extensionForUri(uri: string) {
-  const fileName = normalizeFileName(uri) || '';
-  const rawExt = fileName.split('.').pop()?.toLowerCase() || '';
-  if (/^[a-z0-9]{2,5}$/.test(rawExt)) return rawExt;
-  return 'jpg';
-}
-
-function createImageFileName(uri: string) {
-  const ext = extensionForUri(uri);
+function createImageFileName(uri: string, hint?: ImageFileHint) {
+  const ext = imageExtension(uri, hint);
   return `footprint-image-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}.${ext}`;
 }
 
@@ -85,17 +79,24 @@ export async function listPersistedFootprintImageHashes(): Promise<Map<string, s
   }
 }
 
-export async function persistFootprintImageUri(uri: string) {
+export async function persistFootprintImageUri(uri: string, hint?: ImageFileHint) {
   if (!isLocalUri(uri) || isRemoteUri(uri)) return uri;
 
   const fileContext = await ensureFootprintImageDirectory();
   if (!fileContext) throw new Error('当前设备不支持本地图片文件存储。');
 
   const { FileSystem, dir } = fileContext;
-  const targetUri = `${dir}${createImageFileName(uri)}`;
+  const targetUri = `${dir}${createImageFileName(uri, hint)}`;
   const existing = await FileSystem.getInfoAsync(targetUri);
   if (existing.exists) await FileSystem.deleteAsync(targetUri, { idempotent: true });
   await FileSystem.copyAsync({ from: uri, to: targetUri });
+  const actualExtension = await readImageExtension(targetUri);
+  if (actualExtension && actualExtension !== targetUri.split('.').pop()) {
+    const corrected = targetUri.replace(/\.[^.]+$/, `.${actualExtension}`);
+    try { await FileSystem.moveAsync({ from: targetUri, to: corrected }); }
+    catch (error) { await FileSystem.deleteAsync(targetUri, { idempotent: true }).catch(() => undefined); throw error; }
+    return corrected;
+  }
   return targetUri;
 }
 

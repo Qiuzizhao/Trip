@@ -9,7 +9,7 @@ export type DuplicatePreview = {
   groups: { id: string; copies: number; keepCount: number; removeCount: number; thumbnailUri?: string }[];
 };
 export type AlbumPermission = 'authorized' | 'limited' | 'undetermined' | 'restricted' | 'denied';
-export const photoAlbumNative = Platform.OS === 'ios' ? requireOptionalNativeModule<{
+export const photoAlbumNative = Platform.OS !== 'web' ? requireOptionalNativeModule<{
   findDuplicates?(): Promise<DuplicatePreview>;
   deleteDuplicates?(token: string): Promise<number>;
   cancelDuplicateScan?(): void;

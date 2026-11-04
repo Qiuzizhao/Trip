@@ -2,6 +2,7 @@
 // 状态常量与字段设计参考 Joplin models/Resource.ts:62-65 与 resource_local_states 表。
 import { ensureFootprintImageDirectory, footprintImageFileNameFromUri } from '@/src/features/daily/footprints/footprintImageFiles';
 import { getJson, setJson } from '../storage';
+import { imageMimeType } from '@/src/features/daily/footprints/imageFormat';
 
 export const ASSET_IDLE = 0;
 export const ASSET_STARTED = 1;
@@ -38,23 +39,7 @@ export function subscribeAssetsLocal(listener: (assets: Asset[]) => void) {
 }
 
 function mimeForExtension(ext: string) {
-  switch (ext.toLowerCase()) {
-    case 'jpg':
-    case 'jpeg':
-      return 'image/jpeg';
-    case 'png':
-      return 'image/png';
-    case 'webp':
-      return 'image/webp';
-    case 'gif':
-      return 'image/gif';
-    case 'heic':
-      return 'image/heic';
-    case 'heif':
-      return 'image/heif';
-    default:
-      return 'application/octet-stream';
-  }
+  return imageMimeType(ext.toLowerCase());
 }
 
 function extensionFromUri(uri: string) {

@@ -48,8 +48,8 @@ type RemoteAssetMetadata = {
   remoteKey: string;
 };
 
-function contextKeyFor(syncTargetId: number) {
-  return `trip-footprints.syncContext.${syncTargetId}`;
+function contextKeyFor(syncTargetId: number, userId: string) {
+  return `trip-footprints.syncContext.${syncTargetId}.${userId}`;
 }
 
 // 判定 1：只有内容变了（或从未上传）才需要上传
@@ -100,8 +100,8 @@ async function publishAssetMetadata(fileApi: FileApi, asset: Asset, remoteKey: s
 }
 
 // 从远端拉取「自上次游标以来的资产元数据」；顺带持久化游标
-async function fetchRemoteAssets(fileApi: FileApi, syncTargetId: number) {
-  const context = await getJson<unknown>(contextKeyFor(syncTargetId), null);
+async function fetchRemoteAssets(fileApi: FileApi, syncTargetId: number, userId: string) {
+  let context = await getJson<unknown>(contextKeyFor(syncTargetId, userId), null);
   // 只有「曾经同步成功过」的资产才参与远端删除检测。
   // 从未上传成功的资产如果也算进去，basicDelta 会误判为「远端已删除」并把本地副本清掉。
   // （Joplin 同样以 sync_time > 0 的项为准，见 models/BaseItem.ts remoteItemMetadata）
@@ -109,33 +109,37 @@ async function fetchRemoteAssets(fileApi: FileApi, syncTargetId: number) {
     .filter((asset) => Boolean(asset.remoteKey) || asset.syncTime > 0)
     .map((asset) => asset.id);
 
-  const result = await fileApi.delta('', {
-    context,
-    allItemIdsHandler: async () => localIds,
-    allItemMetadataHandler: async () => new Map(),
-    wipeOutFailSafe: false,
-  } as never);
-
-  if (result.context) {
-    await setJson(contextKeyFor(syncTargetId), result.context);
-  }
-
   const assets: RemoteAssetMetadata[] = [];
   const deletedIds: string[] = [];
-  for (const item of result.items as { path?: string; isDeleted?: boolean }[]) {
-    if (!item.path) continue;
-    if (item.isDeleted) {
-      // '<hex>.md' -> '<hex>'
-      const name = item.path.split('/').pop() || '';
-      const id = name.replace(/\.[^.]+$/, '');
-      if (id) deletedIds.push(id);
-      continue;
+  let hasMore: boolean;
+  do {
+    const result = await fileApi.delta('', {
+      context,
+      allItemIdsHandler: async () => localIds,
+      allItemMetadataHandler: async () => new Map(),
+      wipeOutFailSafe: false,
+    } as never);
+
+    hasMore = Boolean(result.hasMore);
+    if (hasMore && JSON.stringify(context) === JSON.stringify(result.context)) {
+      throw new Error('同步游标未前进，已停止删除检测');
     }
-    const body = await fileApi.get(item.path);
-    const metadata = parseMetadata(typeof body === 'string' ? body : null);
-    if (metadata) assets.push(metadata);
-  }
-  return { assets, deletedIds };
+    context = result.context;
+    for (const item of result.items as { path?: string; isDeleted?: boolean }[]) {
+      if (!item.path) continue;
+      if (item.isDeleted) {
+        // '<hex>.md' -> '<hex>'
+        const name = item.path.split('/').pop() || '';
+        const id = name.replace(/\.[^.]+$/, '');
+        if (id) deletedIds.push(id);
+        continue;
+      }
+      const body = await fileApi.get(item.path);
+      const metadata = parseMetadata(typeof body === 'string' ? body : null);
+      if (metadata) assets.push(metadata);
+    }
+  } while (hasMore);
+  return { assets, deletedIds, commit: () => setJson(contextKeyFor(syncTargetId, userId), context) };
 }
 
 export async function runAssetSync({
@@ -212,7 +216,7 @@ export async function runAssetSync({
   await uploadQueue.waitForAll();
 
   // --- 2) 远端元数据 ---
-  const { assets: remoteAssets, deletedIds } = await fetchRemoteAssets(fileApi, syncTargetId);
+  const { assets: remoteAssets, deletedIds, commit } = await fetchRemoteAssets(fileApi, syncTargetId, userId);
 
   // --- 2.5) 远端已删除的资产 -> 删除本地副本 ---
   for (const deletedId of deletedIds) {
@@ -319,5 +323,6 @@ export async function runAssetSync({
     }
   }
 
+  if (!result.failed) await commit();
   return result;
 }

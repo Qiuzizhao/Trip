@@ -1,5 +1,6 @@
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
+import { imageMimeType, readImageExtension } from './imageFormat';
 
 function fileExtensionForUri(uri: string) {
   const cleanUri = uri.split('?')[0]?.split('#')[0] || '';
@@ -46,7 +47,7 @@ export async function shareFootprintImage(uri: string) {
   }
 
   await Sharing.shareAsync(shareUri, {
-    mimeType: `image/${fileExtensionForUri(shareUri)}`,
+    mimeType: imageMimeType(await readImageExtension(shareUri) || fileExtensionForUri(shareUri)),
     dialogTitle: '下载图片',
     UTI: 'public.image',
   });

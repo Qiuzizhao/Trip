@@ -48,13 +48,21 @@ export function createSupabaseSyncBackend(): SyncBackend {
 
   return {
     async listItems(prefix) {
-      const { data, error } = await supabase
-        .from(SYNC_ITEMS_TABLE)
-        .select(columns)
-        .like('path', `${prefix}%`)
-        .limit(1000);
-      if (error) throw error;
-      return (data ?? []).map((row) => toRow(row as Record<string, unknown>));
+      const rows: SyncItemRow[] = [];
+      let after: string | null = null;
+      while (true) {
+        let query = supabase.from(SYNC_ITEMS_TABLE).select(columns)
+          .like('path', `${prefix}%`).order('path', { ascending: true }).limit(500);
+        if (after) query = query.gt('path', after);
+        const { data, error } = await query;
+        if (error) throw error;
+        if (!data?.length) break;
+        rows.push(...data.map((row) => toRow(row as Record<string, unknown>)));
+        const next = String(data[data.length - 1].path);
+        if (after && next <= after) throw new Error('同步列表分页未前进，已停止删除检测');
+        after = next;
+      }
+      return rows;
     },
 
     async getItem(path) {
@@ -92,12 +100,17 @@ export function createSupabaseSyncBackend(): SyncBackend {
 
     async listSizes(folder) {
       try {
-        const { data, error } = await supabase.storage.from(bucket).list(folder, { limit: 1000 });
-        if (error) return null;
         const sizes = new Map<string, number>();
-        for (const entry of data ?? []) {
-          const size = Number((entry.metadata as { size?: number } | null)?.size);
-          if (Number.isFinite(size)) sizes.set(entry.name, size);
+        for (let offset = 0; ; ) {
+          const { data, error } = await supabase.storage.from(bucket).list(folder,
+            { limit: 500, offset, sortBy: { column: 'name', order: 'asc' } });
+          if (error) return null;
+          if (!data?.length) break;
+          for (const entry of data) {
+            const size = Number((entry.metadata as { size?: number } | null)?.size);
+            if (Number.isFinite(size)) sizes.set(entry.name, size);
+          }
+          offset += data.length;
         }
         return sizes;
       } catch {
@@ -136,7 +149,7 @@ export function createSupabaseSyncBackend(): SyncBackend {
       // 回读校验：避免再次出现「200 但 0 字节」
       const folder = objectKey.split('/').slice(0, -1).join('/');
       const fileName = objectKey.split('/').pop() as string;
-      const { data, error } = await supabase.storage.from(bucket).list(folder, { limit: 100 });
+      const { data, error } = await supabase.storage.from(bucket).list(folder, { limit: 100, search: fileName });
       if (error) throw error;
       const entry = (data ?? []).find((item) => item.name === fileName);
       const storedSize = Number((entry?.metadata as { size?: number } | null)?.size ?? 0);

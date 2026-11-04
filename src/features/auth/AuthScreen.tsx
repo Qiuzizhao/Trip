@@ -5,6 +5,7 @@ import { Alert, KeyboardAvoidingView, Platform, Pressable, StyleSheet, Text, Vie
 
 import { Header, PrimaryButton, Screen, SheetTextInput } from '@/src/shared/components';
 import { clearAccountLocalData } from '@/src/local/localDataRepository';
+import { withAccountDataLock } from '@/src/sync/accountDataLock';
 import { colors, radius, spacing } from '@/src/shared/theme';
 import {
   getCurrentSession,
@@ -36,9 +37,9 @@ export function AuthScreen() {
     if (!trimmedEmail || !password || loading) return;
     setLoading(true);
     try {
-      const result = mode === 'signIn'
+      const result = await withAccountDataLock(async () => mode === 'signIn'
         ? await signInWithEmailPassword(trimmedEmail, password)
-        : await signUpWithEmailPassword(trimmedEmail, password);
+        : await signUpWithEmailPassword(trimmedEmail, password));
       setUserEmail(result.user?.email ?? trimmedEmail);
       Alert.alert(mode === 'signIn' ? '登录成功' : '注册成功', '现在可以回到足迹页手动同步。', [
         { text: '好的', onPress: () => router.replace('/') },
@@ -53,8 +54,10 @@ export function AuthScreen() {
   const logout = async () => {
     setLoading(true);
     try {
-      await signOut();
-      await clearAccountLocalData();
+      await withAccountDataLock(async () => {
+        await signOut();
+        await clearAccountLocalData();
+      });
       setUserEmail(null);
       Alert.alert('已退出登录', '本机上的账号足迹已清空。', [
         { text: '好的', onPress: () => router.replace('/') },
